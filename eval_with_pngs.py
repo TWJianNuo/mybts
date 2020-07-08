@@ -106,7 +106,7 @@ def test():
     print('Raw png files reading done')
     print('Evaluating {} files'.format(len(pred_depths)))
 
-    test_entries_path = os.path.join('..', 'train_test_inputs', 'eigen_test_files_with_gt_modified.txt')
+    test_entries_path = os.path.join('', 'train_test_inputs', 'eigen_test_files_with_gt_modified.txt')
     with open(test_entries_path) as f:
         test_entries = f.readlines()
     entry_lookupdict = dict()
