@@ -150,6 +150,7 @@ class DataLoadPreprocess(Dataset):
                 gt_path = self.args.gt_path_eval
                 depth_path = os.path.join(gt_path, "./" + sample_path.split()[1])
                 has_valid_depth = False
+                gt_shape = np.zeros([1,2])
                 try:
                     depth_gt = Image.open(depth_path)
                     has_valid_depth = True
@@ -160,6 +161,7 @@ class DataLoadPreprocess(Dataset):
                 if has_valid_depth:
                     depth_gt = np.asarray(depth_gt, dtype=np.float32)
                     depth_gt = np.expand_dims(depth_gt, axis=2)
+                    gt_shape[:] = depth_gt.shape[0:2]
                     if self.args.dataset == 'nyu':
                         depth_gt = depth_gt / 1000.0
                     else:
@@ -175,7 +177,7 @@ class DataLoadPreprocess(Dataset):
                     depth_gt = depth_gt[top_margin:top_margin + 352, left_margin:left_margin + 1216, :]
             
             if self.mode == 'online_eval':
-                sample = {'image': image, 'depth': depth_gt, 'focal': focal, 'has_valid_depth': has_valid_depth}
+                sample = {'image': image, 'depth': depth_gt, 'focal': focal, 'has_valid_depth': has_valid_depth, 'gt_shape' : gt_shape}
             else:
                 sample = {'image': image, 'focal': focal}
         
@@ -257,7 +259,10 @@ class ToTensor(object):
             return {'image': image, 'depth': depth, 'focal': focal}
         else:
             has_valid_depth = sample['has_valid_depth']
-            return {'image': image, 'depth': depth, 'focal': focal, 'has_valid_depth': has_valid_depth}
+            if 'gt_shape' in sample:
+                return {'image': image, 'depth': depth, 'focal': focal, 'has_valid_depth': has_valid_depth, 'gt_shape': sample['gt_shape']}
+            else:
+                return {'image': image, 'depth': depth, 'focal': focal, 'has_valid_depth': has_valid_depth}
     
     def to_tensor(self, pic):
         if not (_is_pil_image(pic) or _is_numpy_image(pic)):

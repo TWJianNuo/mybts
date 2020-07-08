@@ -28,6 +28,7 @@ import matplotlib.cm
 from tqdm import tqdm
 
 from bts_dataloader import *
+from util import *
 
 def convert_arg_line_to_args(arg_line):
     for arg in arg_line.split():
@@ -245,6 +246,7 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
             focal = torch.autograd.Variable(eval_sample_batched['focal'].cuda(gpu, non_blocking=True))
             gt_depth = eval_sample_batched['depth']
             has_valid_depth = eval_sample_batched['has_valid_depth']
+            gt_shape = eval_sample_batched['gt_shape']
             if not has_valid_depth:
                 # print('Invalid depth. continue.')
                 continue
@@ -270,15 +272,17 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
         valid_mask = np.logical_and(gt_depth > args.min_depth_eval, gt_depth < args.max_depth_eval)
 
         if args.garg_crop or args.eigen_crop:
-            gt_height, gt_width = gt_depth.shape
+            gt_height, gt_width = gt_shape.numpy()[0,0,:]
             eval_mask = np.zeros(valid_mask.shape)
 
+            top_margin = int(gt_shape[0,0,0] - 352)
+            left_margin = int((gt_shape[0,0,1] - 1216) / 2)
             if args.garg_crop:
-                eval_mask[int(0.40810811 * gt_height):int(0.99189189 * gt_height), int(0.03594771 * gt_width):int(0.96405229 * gt_width)] = 1
+                eval_mask[int(0.40810811 * gt_height)-top_margin:int(0.99189189 * gt_height)-top_margin, int(0.03594771 * gt_width)-left_margin:int(0.96405229 * gt_width)-left_margin] = 1
 
             elif args.eigen_crop:
                 if args.dataset == 'kitti':
-                    eval_mask[int(0.3324324 * gt_height):int(0.91351351 * gt_height), int(0.0359477 * gt_width):int(0.96405229 * gt_width)] = 1
+                    eval_mask[int(0.3324324 * gt_height)-top_margin:int(0.91351351 * gt_height)-top_margin, int(0.0359477 * gt_width)-left_margin:int(0.96405229 * gt_width)-left_margin] = 1
                 else:
                     eval_mask[45:471, 41:601] = 1
 
@@ -393,6 +397,14 @@ def main_worker(gpu, ngpus_per_node, args):
 
     dataloader = BtsDataLoader(args, 'train')
     dataloader_eval = BtsDataLoader(args, 'online_eval')
+
+
+    # model.eval()
+    # eval_measures = online_eval(model, dataloader_eval, gpu, ngpus_per_node)
+    # print(eval_measures)
+    #
+    # import sys
+    # sys.exit()
 
     # Logging
     if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):

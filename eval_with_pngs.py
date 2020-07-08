@@ -21,6 +21,9 @@ import argparse
 import fnmatch
 import cv2
 import numpy as np
+import pathlib
+from util import *
+import torch
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
@@ -106,7 +109,7 @@ def test():
     print('Raw png files reading done')
     print('Evaluating {} files'.format(len(pred_depths)))
 
-    test_entries_path = os.path.join('', 'train_test_inputs', 'eigen_test_files_with_gt_modified.txt')
+    test_entries_path = os.path.join(str(pathlib.Path(__file__).parent.absolute()), 'train_test_inputs', 'eigen_test_files_with_gt_modified.txt')
     with open(test_entries_path) as f:
         test_entries = f.readlines()
     entry_lookupdict = dict()
@@ -115,7 +118,6 @@ def test():
             entry_lookupdict[entry.split(' ')[0].replace('data/', '')] = True
         else:
             entry_lookupdict[entry.split(' ')[0].replace('data/', '')] = False
-
 
     if args.dataset == 'kitti':
         for t_id in range(num_test_samples):
@@ -132,6 +134,53 @@ def test():
 
             depth = depth.astype(np.float32) / 256.0
             gt_depths.append(depth)
+
+            # if os.path.join(directory, 'image_02', filename + '.png') == '2011_09_26/2011_09_26_drive_0002_sync/image_02/0000000069.png':
+            #     tensor2disp(torch.from_numpy(1 / pred_depths[t_id]).unsqueeze(0).unsqueeze(0)).show()
+            #     gt_depth = depth
+            #     pred_depth = pred_depths[t_id]
+            #
+            #     pred_depth[pred_depth < args.min_depth_eval] = args.min_depth_eval
+            #     pred_depth[pred_depth > args.max_depth_eval] = args.max_depth_eval
+            #     pred_depth[np.isinf(pred_depth)] = args.max_depth_eval
+            #
+            #     gt_depth[np.isinf(gt_depth)] = 0
+            #     gt_depth[np.isnan(gt_depth)] = 0
+            #
+            #     valid_mask = np.logical_and(gt_depth > args.min_depth_eval, gt_depth < args.max_depth_eval)
+            #
+            #     if args.do_kb_crop:
+            #         height, width = gt_depth.shape
+            #         top_margin = int(height - 352)
+            #         left_margin = int((width - 1216) / 2)
+            #         pred_depth_uncropped = np.zeros((height, width), dtype=np.float32)
+            #         pred_depth_uncropped[top_margin:top_margin + 352, left_margin:left_margin + 1216] = pred_depth
+            #         pred_depth = pred_depth_uncropped
+            #
+            #     if args.garg_crop or args.eigen_crop:
+            #         gt_height, gt_width = gt_depth.shape
+            #         eval_mask = np.zeros(valid_mask.shape)
+            #
+            #         if args.garg_crop:
+            #             eval_mask[int(0.40810811 * gt_height):int(0.99189189 * gt_height),
+            #             int(0.03594771 * gt_width):int(0.96405229 * gt_width)] = 1
+            #
+            #         elif args.eigen_crop:
+            #             if args.dataset == 'kitti':
+            #                 eval_mask[int(0.3324324 * gt_height):int(0.91351351 * gt_height),
+            #                 int(0.0359477 * gt_width):int(0.96405229 * gt_width)] = 1
+            #             else:
+            #                 eval_mask[45:471, 41:601] = 1
+            #
+            #         valid_mask = np.logical_and(valid_mask, eval_mask)
+            #
+            #     tensor2disp(torch.from_numpy(gt_depth > 0).unsqueeze(0).unsqueeze(0), vmax=1).show()
+            #     fig1 = tensor2disp(torch.from_numpy(valid_mask).unsqueeze(0).unsqueeze(0), vmax=1)
+            #     fig2 = tensor2disp(1/torch.from_numpy(pred_depth).unsqueeze(0).unsqueeze(0))
+            #     pil.fromarray(np.concatenate([np.array(fig1), np.array(fig2)], axis=0)).show()
+            #
+            #     print(compute_errors(gt_depth[valid_mask], pred_depth[valid_mask])[2])
+
 
     elif args.dataset == 'nyu':
         for t_id in range(num_test_samples):
@@ -162,7 +211,6 @@ def eval(pred_depths):
     num_samples = len(pred_depths)
     pred_depths_valid = []
 
-    i = 0
     for t_id in range(num_samples):
         if t_id in missing_ids:
             continue
