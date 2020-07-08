@@ -106,14 +106,26 @@ def test():
     print('Raw png files reading done')
     print('Evaluating {} files'.format(len(pred_depths)))
 
+    test_entries_path = os.path.join('..', 'train_test_inputs', 'eigen_test_files_with_gt_modified.txt')
+    with open(test_entries_path) as f:
+        test_entries = f.readlines()
+    entry_lookupdict = dict()
+    for entry in test_entries:
+        if entry.split(' ')[1] != 'None':
+            entry_lookupdict[entry.split(' ')[0].replace('data/', '')] = True
+        else:
+            entry_lookupdict[entry.split(' ')[0].replace('data/', '')] = False
+
+
     if args.dataset == 'kitti':
         for t_id in range(num_test_samples):
             file_dir = pred_filenames[t_id].split('.')[0]
             filename = file_dir.split('_')[-1]
-            directory = file_dir.replace('_' + filename, '')
-            gt_depth_path = os.path.join(args.gt_path, directory, 'proj_depth/groundtruth/image_02', filename + '.png')
+            directory = os.path.join(file_dir.replace('_' + filename, '')[0:10], file_dir.replace('_' + filename, ''))
+            gt_depth_path = os.path.join(args.gt_path, directory, 'image_02', filename + '.png')
             depth = cv2.imread(gt_depth_path, -1)
-            if depth is None:
+
+            if not entry_lookupdict[os.path.join(directory, 'image_02', filename + '.png')]:
                 print('Missing: %s ' % gt_depth_path)
                 missing_ids.add(t_id)
                 continue
