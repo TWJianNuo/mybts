@@ -18,4 +18,4 @@ def tensor2disp(tensor, vmax=0.18, percentile=None, viewind=0):
         vmax = np.percentile(tnp, percentile)
     tnp = tnp / vmax
     tnp = (cm(tnp) * 255).astype(np.uint8)
-    return pil.fromarray(tnp)
+    return pil.fromarray(tnp[:, :, 0:3])
