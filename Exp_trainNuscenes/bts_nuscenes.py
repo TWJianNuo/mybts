@@ -504,12 +504,14 @@ def main_worker(gpu, ngpus_per_node, args):
                     for i in range(num_log_images):
                         writer.add_image('depth_gt/image/{}'.format(i), normalize_result(1/depth_gt[i, :, :, :].data), global_step)
                         writer.add_image('depth_est/image/{}'.format(i), normalize_result(1/depth_est[i, :, :, :].data), global_step)
-                        # writer.add_image('depth_est/image/{}'.format(i), normalize_result(1/depth_est[i, :, :, :].data), global_step)
                         writer.add_image('reduc1x1/image/{}'.format(i), normalize_result(1/reduc1x1[i, :, :, :].data), global_step)
                         writer.add_image('lpg2x2/image/{}'.format(i), normalize_result(1/lpg2x2[i, :, :, :].data), global_step)
                         writer.add_image('lpg4x4/image/{}'.format(i), normalize_result(1/lpg4x4[i, :, :, :].data), global_step)
                         writer.add_image('lpg8x8/image/{}'.format(i), normalize_result(1/lpg8x8[i, :, :, :].data), global_step)
                         writer.add_image('image/image/{}'.format(i), inv_normalize(image[i, :, :, :]).data, global_step)
+
+                        figdisp = np.array(tensor2disp(1 / depth_est, vmax=0.15, viewind=i))
+                        writer.add_image('disp_est/image/{}'.format(i), (torch.from_numpy(figdisp).float() / 255).permute([2, 0, 1]), global_step)
                     writer.flush()
 
             if not args.do_online_eval and global_step and global_step % args.save_freq == 0:
