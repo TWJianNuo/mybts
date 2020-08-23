@@ -82,6 +82,8 @@ class DataLoadPreprocess(Dataset):
         if mode == 'online_eval':
             with open(args.filenames_file_eval, 'r') as f:
                 self.filenames = f.readlines()
+
+            self.filenames = self.filenames[0::3]
         else:
             with open(args.filenames_file, 'r') as f:
                 self.filenames = f.readlines()
@@ -261,8 +263,9 @@ class ToTensor(object):
             return {'image': image, 'focal': focal}
 
         depth = sample['depth']
+        depth = self.to_tensor(depth)
+
         if self.mode == 'train':
-            depth = self.to_tensor(depth)
             return {'image': image, 'depth': depth, 'focal': focal}
         else:
             has_valid_depth = sample['has_valid_depth']

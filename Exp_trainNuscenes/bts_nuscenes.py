@@ -265,6 +265,9 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
 
             _, _, _, _, pred_depth = model(image, focal)
 
+            pred_depth[torch.isinf(pred_depth)] = args.max_depth_eval
+            pred_depth[torch.isnan(pred_depth)] = args.min_depth_eval
+
             pred_depth = torch.nn.functional.interpolate(pred_depth, scale_factor=2, mode='bilinear', align_corners=True)
             pred_depth = pred_depth.cpu().numpy().squeeze()
             gt_depth = gt_depth.cpu().numpy().squeeze()
@@ -279,8 +282,8 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
 
         pred_depth[pred_depth < args.min_depth_eval] = args.min_depth_eval
         pred_depth[pred_depth > args.max_depth_eval] = args.max_depth_eval
-        pred_depth[np.isinf(pred_depth)] = args.max_depth_eval
-        pred_depth[np.isnan(pred_depth)] = args.min_depth_eval
+        # pred_depth[np.isinf(pred_depth)] = args.max_depth_eval
+        # pred_depth[np.isnan(pred_depth)] = args.min_depth_eval
 
         valid_mask = np.logical_and(gt_depth > args.min_depth_eval, gt_depth < args.max_depth_eval)
 
