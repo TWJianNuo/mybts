@@ -128,6 +128,8 @@ def test(args):
             pred_depth[torch.isinf(pred_depth)] = args.max_depth_eval
             pred_depth[torch.isnan(pred_depth)] = args.min_depth_eval
 
+            pred_depth = torch.clamp(pred_depth, min=args.min_depth_eval, max=args.max_depth_eval)
+
             pred_depth = torch.nn.functional.interpolate(pred_depth, scale_factor=2, mode='bilinear', align_corners=True)
             pred_depth = pred_depth.cpu().numpy().squeeze()
             gt_depth = gt_depth.cpu().numpy().squeeze()

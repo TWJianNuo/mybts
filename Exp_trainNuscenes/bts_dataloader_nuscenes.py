@@ -211,7 +211,7 @@ class DataLoadPreprocess(Dataset):
         assert img.shape[0] == depth.shape[0]
         assert img.shape[1] == depth.shape[1]
         x = int((img.shape[1] - width) / 2)
-        y = int((img.shape[0] - height) / 2)
+        y = int((img.shape[0] - height))
         img = img[y:y + height, x:x + width, :]
         depth = depth[y:y + height, x:x + width, :]
         return img, depth
