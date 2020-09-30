@@ -430,7 +430,7 @@ def main_worker(gpu, ngpus_per_node, args):
     start_time = time.time()
     duration = 0
 
-    num_log_images = args.batch_size
+    num_log_images = 1
     end_learning_rate = args.end_learning_rate if args.end_learning_rate != -1 else 0.1 * args.learning_rate
 
     var_sum = [var.sum() for var in model.parameters() if var.requires_grad]
@@ -500,20 +500,25 @@ def main_worker(gpu, ngpus_per_node, args):
                     writer.add_scalar('var average', var_sum.item()/var_cnt, global_step)
                     depth_gt = torch.where(depth_gt < 1e-3, depth_gt * 0 + 1e3, depth_gt)
                     for i in range(num_log_images):
-                        writer.add_image('depth_gt/image/{}'.format(i), normalize_result(1/depth_gt[i, :, :, :].data), global_step)
-                        writer.add_image('depth_est/image/{}'.format(i), normalize_result(1/depth_est[i, :, :, :].data), global_step)
-                        writer.add_image('reduc1x1/image/{}'.format(i), normalize_result(1/reduc1x1[i, :, :, :].data), global_step)
-                        writer.add_image('lpg2x2/image/{}'.format(i), normalize_result(1/lpg2x2[i, :, :, :].data), global_step)
-                        writer.add_image('lpg4x4/image/{}'.format(i), normalize_result(1/lpg4x4[i, :, :, :].data), global_step)
-                        writer.add_image('lpg8x8/image/{}'.format(i), normalize_result(1/lpg8x8[i, :, :, :].data), global_step)
+                        fig1 = tensor2disp(depth_gt, vmax=30, viewind=i)
+                        fig2 = tensor2disp(depth_est, vmax=30, viewind=i)
+                        fig3 = tensor2disp(reduc1x1, percentile=90, viewind=i)
+
+                        fig4 = tensor2disp(lpg2x2, percentile=90, viewind=i)
+                        fig5 = tensor2disp(lpg4x4, percentile=90, viewind=i)
+                        fig6 = tensor2disp(lpg8x8, percentile=90, viewind=i)
+
+                        figm = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3)], axis=0)
+                        figr = np.concatenate([np.array(fig4), np.array(fig5), np.array(fig6)], axis=0)
 
                         minang = - np.pi / 3 * 2
                         maxang = 2 * np.pi - np.pi / 3 * 2
                         figrgb = tensor2rgb(sample_batched['image'], viewind=i)
                         figshapeh = tensor2disp(((sample_batched['shapeh'] * 0.229 + 0.485) - 0.5) * 2 * np.pi - minang, viewind=i, vmax=maxang)
                         figshapev = tensor2disp(((sample_batched['shapev'] * 0.229 + 0.485) - 0.5) * 2 * np.pi - minang, viewind=i, vmax=maxang)
-                        figcombined = np.concatenate([np.array(figrgb), np.array(figshapeh), np.array(figshapev)], axis=0)
+                        figl = np.concatenate([np.array(figrgb), np.array(figshapeh), np.array(figshapev)], axis=0)
 
+                        figcombined = np.concatenate([np.array(figl), np.array(figm), np.array(figr)], axis=1)
                         writer.add_image('oview/image/{}'.format(i), (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), global_step)
 
                     writer.flush()
