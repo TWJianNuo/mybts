@@ -53,6 +53,7 @@ parser.add_argument('--filenames_file',            type=str,   help='path to the
 parser.add_argument('--input_height',              type=int,   help='input height', default=480)
 parser.add_argument('--input_width',               type=int,   help='input width',  default=640)
 parser.add_argument('--max_depth',                 type=float, help='maximum depth in estimation', default=10)
+parser.add_argument('--angdata_path',              type=str,   help='path to the predicted shape', required=True)
 
 # Log and save
 parser.add_argument('--log_directory',             type=str,   help='directory to save checkpoints and summaries', default='')

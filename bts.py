@@ -294,6 +294,11 @@ class encoder(nn.Module):
             self.base_model = models.resnext101_32x8d(pretrained=True)
             self.feat_names = ['relu', 'layer1', 'layer2', 'layer3', 'layer4']
             self.feat_out_channels = [64, 256, 512, 1024, 2048]
+        elif params.encoder == 'densenet121_bts_rgbshape':
+            from Exp_trainwithShape.densenet import densenet121rgbshape
+            self.base_model = densenet121rgbshape(pretrained=True, ninput=5).features
+            self.feat_names = ['relu0', 'pool0', 'transition1', 'transition2', 'norm5']
+            self.feat_out_channels = [64, 64, 128, 256, 1024]
         elif params.encoder == 'densenet161_bts_rgbshape':
             from Exp_trainwithShape.densenet import densenet161rgbshape
             self.base_model = densenet161rgbshape(pretrained=True, ninput=5).features

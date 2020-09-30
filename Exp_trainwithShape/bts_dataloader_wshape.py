@@ -15,7 +15,6 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>
 
 import numpy as np
-import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.utils.data.distributed
 from torchvision import transforms
@@ -58,7 +57,6 @@ class BtsDataLoader(object):
         elif mode == 'online_eval':
             self.testing_samples = DataLoadPreprocess(args, mode, transform=preprocessing_transforms(mode))
             if args.distributed:
-                # self.eval_sampler = torch.utils.data.distributed.DistributedSampler(self.testing_samples, shuffle=False)
                 self.eval_sampler = DistributedSamplerNoEvenlyDivisible(self.testing_samples, shuffle=False)
             else:
                 self.eval_sampler = None
@@ -93,22 +91,27 @@ class DataLoadPreprocess(Dataset):
 
     def __getitem__(self, idx):
         sample_path = self.filenames[idx]
-        focal = float(sample_path.split()[2])
+        sample_path = '2011_10_03/2011_10_03_drive_0034_sync/image_02/data/0000000979.png 2011_10_03/2011_10_03_drive_0034_sync/image_02/0000000979.png 718.856\n'
+        calibpath = os.path.join(self.args.data_path, sample_path.split(' ')[0].split('/')[0], 'calib_cam_to_cam.txt')
+        K = get_intrinsic(calibpath, camind=2) # We do not use right camera
+        focal = K[0, 0]
 
         if self.mode == 'train':
-            if self.args.dataset == 'kitti' and self.args.use_right is True and random.random() > 0.5:
-                image_path = os.path.join(self.args.data_path, sample_path.split()[3])
-                depth_path = os.path.join(self.args.gt_path, sample_path.split()[4])
+            # We do not use the right image here
+            do_flip = random.random() > 0.5
+            image_path = os.path.join(self.args.data_path, sample_path.split()[0])
+            depth_path = os.path.join(self.args.gt_path, sample_path.split()[1])
+            if do_flip:
+                shapeh_path = os.path.join(self.args.angdata_path, 'angh_flipped', sample_path.split()[0].replace('/data', ''))
+                shapev_path = os.path.join(self.args.angdata_path, 'angv_flipped', sample_path.split()[0].replace('/data', ''))
             else:
-                image_path = os.path.join(self.args.data_path, sample_path.split()[0])
-                depth_path = os.path.join(self.args.gt_path, sample_path.split()[1])
-                shapeh_path = os.path.join(self.args.shapedata_path, sample_path.split()[0].replace('image_02/data', 'htheta/image_02'))
-                shapev_path = os.path.join(self.args.shapedata_path, sample_path.split()[0].replace('image_02/data', 'vtheta/image_02'))
+                shapeh_path = os.path.join(self.args.angdata_path, 'angh', sample_path.split()[0].replace('/data', ''))
+                shapev_path = os.path.join(self.args.angdata_path, 'angv', sample_path.split()[0].replace('/data', ''))
 
             image = Image.open(image_path)
             depth_gt = Image.open(depth_path)
-            shapeh = Image.open(shapeh_path).resize(image.size, Image.ANTIALIAS)
-            shapev = Image.open(shapev_path).resize(image.size, Image.ANTIALIAS)
+            shapeh = Image.open(shapeh_path)
+            shapev = Image.open(shapev_path)
 
             if self.args.do_kb_crop is True:
                 height = image.height
@@ -121,35 +124,19 @@ class DataLoadPreprocess(Dataset):
                 shapeh = shapeh.crop((left_margin, top_margin, left_margin + 1216, top_margin + 352))
                 shapev = shapev.crop((left_margin, top_margin, left_margin + 1216, top_margin + 352))
 
-            # To avoid blank boundaries due to pixel registration
-            if self.args.dataset == 'nyu':
-                depth_gt = depth_gt.crop((43, 45, 608, 472))
-                image = image.crop((43, 45, 608, 472))
-
-            if self.args.do_random_rotate is True:
-                random_angle = (random.random() - 0.5) * 2 * self.args.degree
-                image = self.rotate_image(image, random_angle)
-                depth_gt = self.rotate_image(depth_gt, random_angle, flag=Image.NEAREST)
-
-                shapeh = self.rotate_image(shapeh, random_angle)
-                shapev = self.rotate_image(shapev, random_angle)
-
             image = np.asarray(image, dtype=np.float32) / 255.0
             depth_gt = np.asarray(depth_gt, dtype=np.float32)
             depth_gt = np.expand_dims(depth_gt, axis=2)
 
-            shapeh = np.asarray(shapeh, dtype=np.float32) / 10.0 / 256.0 / 2 / np.pi
-            shapev = np.asarray(shapev, dtype=np.float32) / 10.0 / 256.0 / 2 / np.pi
+            shapeh = np.asarray(shapeh, dtype=np.float32) / 255.0 / 255.0
+            shapev = np.asarray(shapev, dtype=np.float32) / 255.0 / 255.0
             shapeh = np.expand_dims(shapeh, axis=2)
             shapev = np.expand_dims(shapev, axis=2)
 
-            if self.args.dataset == 'nyu':
-                depth_gt = depth_gt / 1000.0
-            else:
-                depth_gt = depth_gt / 256.0
+            depth_gt = depth_gt / 256.0
 
             image, depth_gt, shapeh, shapev = self.random_crop(image, depth_gt, shapeh, shapev, self.args.input_height, self.args.input_width)
-            image, depth_gt, shapeh, shapev = self.train_preprocess(image, depth_gt, shapeh, shapev)
+            image, depth_gt, shapeh, shapev = self.train_preprocess(image, depth_gt, shapeh, shapev, do_flip=do_flip)
             sample = {'image': image, 'depth': depth_gt, 'focal': focal, 'shapeh': shapeh, 'shapev': shapev}
 
         else:
@@ -161,15 +148,13 @@ class DataLoadPreprocess(Dataset):
             image_path = os.path.join(data_path, "./" + sample_path.split()[0])
             image = np.asarray(Image.open(image_path), dtype=np.float32) / 255.0
 
-            shapeh_path = os.path.join(self.args.shapedata_path, sample_path.split()[0].replace('image_02/data', 'htheta/image_02'))
-            shapev_path = os.path.join(self.args.shapedata_path, sample_path.split()[0].replace('image_02/data', 'vtheta/image_02'))
+            shapeh_path = os.path.join(self.args.angdata_path, 'angh', sample_path.split()[0].replace('/data', ''))
+            shapev_path = os.path.join(self.args.angdata_path, 'angv', sample_path.split()[0].replace('/data', ''))
 
-            rgbsize = [image.shape[1], image.shape[0]]
-            shapeh = Image.open(shapeh_path).resize(rgbsize, Image.ANTIALIAS)
-            shapev = Image.open(shapev_path).resize(rgbsize, Image.ANTIALIAS)
-
-            shapeh = np.asarray(shapeh, dtype=np.float32) / 10.0 / 256.0 / 2 / np.pi
-            shapev = np.asarray(shapev, dtype=np.float32) / 10.0 / 256.0 / 2 / np.pi
+            shapeh = Image.open(shapeh_path)
+            shapev = Image.open(shapev_path)
+            shapeh = np.asarray(shapeh, dtype=np.float32) / 255.0 / 255.0
+            shapev = np.asarray(shapev, dtype=np.float32) / 255.0 / 255.0
             shapeh = np.expand_dims(shapeh, axis=2)
             shapev = np.expand_dims(shapev, axis=2)
 
@@ -189,10 +174,7 @@ class DataLoadPreprocess(Dataset):
                     depth_gt = np.asarray(depth_gt, dtype=np.float32)
                     depth_gt = np.expand_dims(depth_gt, axis=2)
                     gt_shape[:] = depth_gt.shape[0:2]
-                    if self.args.dataset == 'nyu':
-                        depth_gt = depth_gt / 1000.0
-                    else:
-                        depth_gt = depth_gt / 256.0
+                    depth_gt = depth_gt / 256.0
 
             if self.args.do_kb_crop is True:
                 height = image.shape[0]
@@ -235,14 +217,11 @@ class DataLoadPreprocess(Dataset):
         shapev = shapev[y:y + height, x:x + width, :]
         return img, depth, shapeh, shapev
 
-    def train_preprocess(self, image, depth_gt, shapeh, shapev):
+    def train_preprocess(self, image, depth_gt, shapeh, shapev, do_flip):
         # Random flipping
-        do_flip = random.random()
-        if do_flip > 0.5:
+        if do_flip:
             image = (image[:, ::-1, :]).copy()
             depth_gt = (depth_gt[:, ::-1, :]).copy()
-            shapeh = (shapeh[:, ::-1, :]).copy()
-            shapev = (shapev[:, ::-1, :]).copy()
 
         # Random gamma, brightness, color augmentation
         do_augment = random.random()
@@ -280,6 +259,7 @@ class ToTensor(object):
     def __init__(self, mode):
         self.mode = mode
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        self.normalizeAng = transforms.Normalize(mean=[0.485], std=[0.229])
 
     def __call__(self, sample):
         image, focal = sample['image'], sample['focal']
@@ -288,6 +268,8 @@ class ToTensor(object):
 
         shapeh = self.to_tensor(sample['shapeh'])
         shapev = self.to_tensor(sample['shapev'])
+        shapeh = self.normalizeAng(shapeh)
+        shapev = self.normalizeAng(shapev)
 
         if self.mode == 'test':
             return {'image': image, 'focal': focal, 'shapeh': shapeh, 'shapev': shapev}
@@ -334,3 +316,31 @@ class ToTensor(object):
             return img.float()
         else:
             return img
+
+
+def get_intrinsic(calibpath, camind):
+    cam2cam = read_calib_file(calibpath)
+    K = np.eye(4)
+    K[0:3, :] = cam2cam['P_rect_0{}'.format(camind)].reshape(3, 4)
+    return K
+
+def read_calib_file(path):
+    """Read KITTI calibration file
+    (from https://github.com/hunse/kitti)
+    """
+    float_chars = set("0123456789.e+- ")
+    data = {}
+    with open(path, 'r') as f:
+        for line in f.readlines():
+            key, value = line.split(':', 1)
+            value = value.strip()
+            data[key] = value
+            if float_chars.issuperset(value):
+                # try to cast to float array
+                try:
+                    data[key] = np.array(list(map(float, value.split(' '))))
+                except ValueError:
+                    # casting error: data[key] already eq. value, so pass
+                    pass
+
+    return data

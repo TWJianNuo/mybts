@@ -65,7 +65,7 @@ parser.add_argument('--filenames_file',            type=str,   help='path to the
 parser.add_argument('--input_height',              type=int,   help='input height', default=480)
 parser.add_argument('--input_width',               type=int,   help='input width',  default=640)
 parser.add_argument('--max_depth',                 type=float, help='maximum depth in estimation', default=10)
-parser.add_argument('--shapedata_path',            type=str,   help='path to the predicted shape', required=True)
+parser.add_argument('--angdata_path',            type=str,   help='path to the predicted shape', required=True)
 
 # Log and save
 parser.add_argument('--log_directory',             type=str,   help='directory to save checkpoints and summaries', default='')
@@ -263,6 +263,7 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
             gt_depth = eval_sample_batched['depth']
             has_valid_depth = eval_sample_batched['has_valid_depth']
             gt_shape = eval_sample_batched['gt_shape']
+
             if not has_valid_depth:
                 # print('Invalid depth. continue.')
                 continue
@@ -506,9 +507,11 @@ def main_worker(gpu, ngpus_per_node, args):
                         writer.add_image('lpg4x4/image/{}'.format(i), normalize_result(1/lpg4x4[i, :, :, :].data), global_step)
                         writer.add_image('lpg8x8/image/{}'.format(i), normalize_result(1/lpg8x8[i, :, :, :].data), global_step)
 
+                        minang = - np.pi / 3 * 2
+                        maxang = 2 * np.pi - np.pi / 3 * 2
                         figrgb = tensor2rgb(sample_batched['image'], viewind=i)
-                        figshapeh = tensor2disp(sample_batched['shapeh'] * 2 * np.pi - 1, viewind = i, vmax=4)
-                        figshapev = tensor2disp(sample_batched['shapev'] * 2 * np.pi - 1, viewind = i, vmax=4)
+                        figshapeh = tensor2disp(((sample_batched['shapeh'] * 0.229 + 0.485) - 0.5) * 2 * np.pi - minang, viewind=i, vmax=maxang)
+                        figshapev = tensor2disp(((sample_batched['shapev'] * 0.229 + 0.485) - 0.5) * 2 * np.pi - minang, viewind=i, vmax=maxang)
                         figcombined = np.concatenate([np.array(figrgb), np.array(figshapeh), np.array(figshapev)], axis=0)
 
                         writer.add_image('oview/image/{}'.format(i), (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), global_step)
