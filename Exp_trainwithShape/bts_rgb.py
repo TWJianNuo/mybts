@@ -14,6 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>
 
+import os,sys,inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir)
+
 import time
 import argparse
 import sys
@@ -21,13 +26,20 @@ import sys
 import torch.backends.cudnn as cudnn
 import torch.multiprocessing as mp
 
-from tensorboardX import SummaryWriter
+import torch
+version_num = torch.__version__
+version_num = ''.join(i for i in version_num if i.isdigit())
+version_num = int(version_num.ljust(10, '0'))
+if version_num > 1100000000:
+    from torch.utils.tensorboard import SummaryWriter
+else:
+    from tensorboardX import SummaryWriter
 
 import matplotlib
 import matplotlib.cm
 from tqdm import tqdm
 
-from bts_dataloader import *
+from Exp_trainwithShape.bts_dataloader_wshape import *
 from util import *
 
 def convert_arg_line_to_args(arg_line):
