@@ -91,9 +91,11 @@ class DataLoadPreprocess(Dataset):
 
     def __getitem__(self, idx):
         sample_path = self.filenames[idx]
+        # sample_path = '2011_10_03/2011_10_03_drive_0034_sync/image_02/data/0000000979.png 2011_10_03/2011_10_03_drive_0034_sync/image_02/0000000979.png 718.856\n'
         calibpath = os.path.join(self.args.data_path, sample_path.split(' ')[0].split('/')[0], 'calib_cam_to_cam.txt')
-        K = get_intrinsic(calibpath, camind=2) # We do not use right camera
-        focal = K[0, 0]
+        K_org = get_intrinsic(calibpath, camind=2) # We do not use right camera
+        focal = K_org[0, 0]
+        K_cropped = np.copy(K_org)
 
         if self.mode == 'train':
             # We do not use the right image here
@@ -112,6 +114,11 @@ class DataLoadPreprocess(Dataset):
             shapeh = Image.open(shapeh_path)
             shapev = Image.open(shapev_path)
 
+            # Random flipping
+            if do_flip:
+                image = image.transpose(Image.FLIP_LEFT_RIGHT)
+                depth_gt = depth_gt.transpose(Image.FLIP_LEFT_RIGHT)
+
             if self.args.do_kb_crop is True:
                 height = image.height
                 width = image.width
@@ -122,6 +129,9 @@ class DataLoadPreprocess(Dataset):
 
                 shapeh = shapeh.crop((left_margin, top_margin, left_margin + 1216, top_margin + 352))
                 shapev = shapev.crop((left_margin, top_margin, left_margin + 1216, top_margin + 352))
+
+                K_cropped[0, 2] = K_cropped[0, 2] - left_margin
+                K_cropped[1, 2] = K_cropped[1, 2] - top_margin
 
             image = np.asarray(image, dtype=np.float32) / 255.0
             depth_gt = np.asarray(depth_gt, dtype=np.float32)
@@ -134,8 +144,8 @@ class DataLoadPreprocess(Dataset):
 
             depth_gt = depth_gt / 256.0
 
-            image, depth_gt, shapeh, shapev = self.random_crop(image, depth_gt, shapeh, shapev, self.args.input_height, self.args.input_width)
-            image, depth_gt, shapeh, shapev = self.train_preprocess(image, depth_gt, shapeh, shapev, do_flip=do_flip)
+            image, depth_gt, shapeh, shapev, K_cropped = self.random_crop(image, depth_gt, shapeh, shapev, K_cropped, self.args.input_height, self.args.input_width)
+            image, depth_gt, shapeh, shapev = self.train_preprocess(image, depth_gt, shapeh, shapev)
             sample = {'image': image, 'depth': depth_gt, 'focal': focal, 'shapeh': shapeh, 'shapev': shapev}
 
         else:
@@ -202,7 +212,7 @@ class DataLoadPreprocess(Dataset):
         result = image.rotate(angle, resample=flag)
         return result
 
-    def random_crop(self, img, depth, shapeh, shapev, height, width):
+    def random_crop(self, img, depth, shapeh, shapev, K_cropped, height, width):
         assert img.shape[0] >= height
         assert img.shape[1] >= width
         assert img.shape[0] == depth.shape[0]
@@ -214,14 +224,12 @@ class DataLoadPreprocess(Dataset):
 
         shapeh = shapeh[y:y + height, x:x + width, :]
         shapev = shapev[y:y + height, x:x + width, :]
-        return img, depth, shapeh, shapev
 
-    def train_preprocess(self, image, depth_gt, shapeh, shapev, do_flip):
-        # Random flipping
-        if do_flip:
-            image = (image[:, ::-1, :]).copy()
-            depth_gt = (depth_gt[:, ::-1, :]).copy()
+        K_cropped[0, 2] = K_cropped[0, 2] - x
+        K_cropped[1, 2] = K_cropped[1, 2] - y
+        return img, depth, shapeh, shapev, K_cropped
 
+    def train_preprocess(self, image, depth_gt, shapeh, shapev):
         # Random gamma, brightness, color augmentation
         do_augment = random.random()
         if do_augment > 0.5:
