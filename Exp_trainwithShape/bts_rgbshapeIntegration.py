@@ -264,12 +264,14 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
             gt_depth = eval_sample_batched['depth']
             has_valid_depth = eval_sample_batched['has_valid_depth']
             gt_shape = eval_sample_batched['gt_shape']
+            ang = torch.cat([eval_sample_batched['shapeh'].cuda(args.gpu, non_blocking=True), eval_sample_batched['shapev'].cuda(args.gpu, non_blocking=True)], dim=1).contiguous()
+            ang = (ang * 0.229 + 0.485 - 0.5) * 2 * np.pi
 
             if not has_valid_depth:
                 # print('Invalid depth. continue.')
                 continue
 
-            _, _, _, _, pred_depth = model(image, K)
+            _, _, _, _, pred_depth = model(image, K, ang, iseval=True)
 
             pred_depth = pred_depth.cpu().numpy().squeeze()
             gt_depth = gt_depth.cpu().numpy().squeeze()

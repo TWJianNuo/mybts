@@ -481,6 +481,7 @@ def main_worker(gpu, ngpus_per_node, args):
                     return -1
 
             duration += time.time() - before_op_time
+
             if global_step and global_step % args.log_freq == 0 and not model_just_loaded:
                 var_sum = [var.sum() for var in model.parameters() if var.requires_grad]
                 var_cnt = len(var_sum)

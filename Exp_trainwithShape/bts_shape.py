@@ -183,7 +183,14 @@ class bts(nn.Module):
         self.get_depth = torch.nn.Sequential(nn.Conv2d(num_features // 16, 1, 3, 1, 1, bias=False), nn.Sigmoid())
 
         self.integrater = SurfaceNormalOptimizer(height=self.params.input_height, width=self.params.input_width, batch_size=int(self.params.batch_size / self.params.world_size))
-    def forward(self, features, K, ang):
+        self.integrater_eval = SurfaceNormalOptimizer(height=352, width=1216, batch_size=1)
+    def forward(self, features, K, ang, iseval=False):
+
+        if iseval:
+            integrater = self.integrater_eval
+        else:
+            integrater = self.integrater
+
         skip0, skip1, skip2, skip3 = features[1], features[2], features[3], features[4]
         dense_features = torch.nn.ReLU()(features[5])
         upconv5 = self.upconv5(dense_features)  # H/16
@@ -210,7 +217,7 @@ class bts(nn.Module):
         daspp_feat = self.daspp_conv(concat4_daspp)
 
         reduc8x8 = self.reduc8x8(daspp_feat)
-        depth_8x8_scaled = self.integrater.patchIntegration(depthmaplow=reduc8x8, intrinsic=K, scale=3, ang=ang)
+        depth_8x8_scaled = integrater.patchIntegration(depthmaplow=reduc8x8, intrinsic=K, scale=3, ang=ang)
         depth_8x8_scaled_ds = torch_nn_func.interpolate(depth_8x8_scaled, scale_factor=0.25, mode='nearest')
 
         upconv3 = self.upconv3(daspp_feat)  # H/4
@@ -219,7 +226,7 @@ class bts(nn.Module):
         iconv3 = self.conv3(concat3)
 
         reduc4x4 = self.reduc4x4(iconv3)
-        depth_4x4_scaled = self.integrater.patchIntegration(depthmaplow=reduc4x4, intrinsic=K, scale=2, ang=ang)
+        depth_4x4_scaled = integrater.patchIntegration(depthmaplow=reduc4x4, intrinsic=K, scale=2, ang=ang)
         depth_4x4_scaled_ds = torch_nn_func.interpolate(depth_4x4_scaled, scale_factor=0.5, mode='nearest')
 
         upconv2 = self.upconv2(iconv3)  # H/2
@@ -228,7 +235,7 @@ class bts(nn.Module):
         iconv2 = self.conv2(concat2)
 
         reduc2x2 = self.reduc2x2(iconv2)
-        depth_2x2_scaled = self.integrater.patchIntegration(depthmaplow=reduc2x2, intrinsic=K, scale=1, ang=ang)
+        depth_2x2_scaled = integrater.patchIntegration(depthmaplow=reduc2x2, intrinsic=K, scale=1, ang=ang)
 
         upconv1 = self.upconv1(iconv2)
         reduc1x1 = self.reduc1x1(upconv1)
@@ -301,6 +308,6 @@ class BtsModelShape(nn.Module):
         self.encoder = encoder(params)
         self.decoder = bts(params, self.encoder.feat_out_channels, params.bts_size)
 
-    def forward(self, x, K, ang):
+    def forward(self, x, K, ang, iseval=False):
         skip_feat = self.encoder(x)
-        return self.decoder(skip_feat, K, ang)
+        return self.decoder(skip_feat, K, ang, iseval)
