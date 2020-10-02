@@ -259,6 +259,7 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
                 eval_sample_batched['image'].cuda(args.gpu, non_blocking=True),
                 eval_sample_batched['shapeh'].cuda(args.gpu, non_blocking=True),
                 eval_sample_batched['shapev'].cuda(args.gpu, non_blocking=True)], dim=1).contiguous())
+
             focal = torch.autograd.Variable(eval_sample_batched['focal'].cuda(gpu, non_blocking=True))
             gt_depth = eval_sample_batched['depth']
             has_valid_depth = eval_sample_batched['has_valid_depth']

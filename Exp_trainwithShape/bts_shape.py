@@ -17,7 +17,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as torch_nn_func
-import math
+from util import SurfaceNormalOptimizer
 
 from collections import namedtuple
 
@@ -149,14 +149,10 @@ class bts(nn.Module):
         self.upconv5 = upconv(feat_out_channels[4], num_features)
         self.bn5 = nn.BatchNorm2d(num_features, momentum=0.01, affine=True, eps=1.1e-5)
 
-        self.conv5 = torch.nn.Sequential(
-            nn.Conv2d(num_features + feat_out_channels[3], num_features, 3, 1, 1, bias=False),
-            nn.ELU())
+        self.conv5 = torch.nn.Sequential(nn.Conv2d(num_features + feat_out_channels[3], num_features, 3, 1, 1, bias=False),nn.ELU())
         self.upconv4 = upconv(num_features, num_features // 2)
         self.bn4 = nn.BatchNorm2d(num_features // 2, momentum=0.01, affine=True, eps=1.1e-5)
-        self.conv4 = torch.nn.Sequential(
-            nn.Conv2d(num_features // 2 + feat_out_channels[2], num_features // 2, 3, 1, 1, bias=False),
-            nn.ELU())
+        self.conv4 = torch.nn.Sequential(nn.Conv2d(num_features // 2 + feat_out_channels[2], num_features // 2, 3, 1, 1, bias=False),nn.ELU())
         self.bn4_2 = nn.BatchNorm2d(num_features // 2, momentum=0.01, affine=True, eps=1.1e-5)
 
         self.daspp_3 = atrous_conv(num_features // 2, num_features // 4, 3, apply_bn_first=False)
@@ -164,37 +160,30 @@ class bts(nn.Module):
         self.daspp_12 = atrous_conv(num_features + feat_out_channels[2], num_features // 4, 12)
         self.daspp_18 = atrous_conv(num_features + num_features // 4 + feat_out_channels[2], num_features // 4, 18)
         self.daspp_24 = atrous_conv(num_features + num_features // 2 + feat_out_channels[2], num_features // 4, 24)
-        self.daspp_conv = torch.nn.Sequential(
-            nn.Conv2d(num_features + num_features // 2 + num_features // 4, num_features // 4, 3, 1, 1, bias=False),
-            nn.ELU())
+        self.daspp_conv = torch.nn.Sequential(nn.Conv2d(num_features + num_features // 2 + num_features // 4, num_features // 4, 3, 1, 1, bias=False), nn.ELU())
         self.reduc8x8 = reduction_1x1(num_features // 4, num_features // 4, self.params.max_depth)
         self.lpg8x8 = local_planar_guidance(8)
 
         self.upconv3 = upconv(num_features // 4, num_features // 4)
         self.bn3 = nn.BatchNorm2d(num_features // 4, momentum=0.01, affine=True, eps=1.1e-5)
-        self.conv3 = torch.nn.Sequential(
-            nn.Conv2d(num_features // 4 + feat_out_channels[1] + 1, num_features // 4, 3, 1, 1, bias=False),
-            nn.ELU())
+        self.conv3 = torch.nn.Sequential(nn.Conv2d(num_features // 4 + feat_out_channels[1] + 1, num_features // 4, 3, 1, 1, bias=False), nn.ELU())
         self.reduc4x4 = reduction_1x1(num_features // 4, num_features // 8, self.params.max_depth)
         self.lpg4x4 = local_planar_guidance(4)
 
         self.upconv2 = upconv(num_features // 4, num_features // 8)
         self.bn2 = nn.BatchNorm2d(num_features // 8, momentum=0.01, affine=True, eps=1.1e-5)
-        self.conv2 = torch.nn.Sequential(
-            nn.Conv2d(num_features // 8 + feat_out_channels[0] + 1, num_features // 8, 3, 1, 1, bias=False),
-            nn.ELU())
+        self.conv2 = torch.nn.Sequential(nn.Conv2d(num_features // 8 + feat_out_channels[0] + 1, num_features // 8, 3, 1, 1, bias=False), nn.ELU())
 
         self.reduc2x2 = reduction_1x1(num_features // 8, num_features // 16, self.params.max_depth)
         self.lpg2x2 = local_planar_guidance(2)
 
         self.upconv1 = upconv(num_features // 8, num_features // 16)
         self.reduc1x1 = reduction_1x1(num_features // 16, num_features // 32, self.params.max_depth, is_final=True)
-        self.conv1 = torch.nn.Sequential(nn.Conv2d(num_features // 16 + 4, num_features // 16, 3, 1, 1, bias=False),
-                                         nn.ELU())
-        self.get_depth = torch.nn.Sequential(nn.Conv2d(num_features // 16, 1, 3, 1, 1, bias=False),
-                                             nn.Sigmoid())
+        self.conv1 = torch.nn.Sequential(nn.Conv2d(num_features // 16 + 4, num_features // 16, 3, 1, 1, bias=False), nn.ELU())
+        self.get_depth = torch.nn.Sequential(nn.Conv2d(num_features // 16, 1, 3, 1, 1, bias=False), nn.Sigmoid())
 
-    def forward(self, features, K):
+        self.integrater = SurfaceNormalOptimizer(height=self.params.input_height, width=self.params.input_width, batch_size=int(self.params.batch_size / self.params.world_size))
+    def forward(self, features, K, ang):
         skip0, skip1, skip2, skip3 = features[1], features[2], features[3], features[4]
         dense_features = torch.nn.ReLU()(features[5])
         upconv5 = self.upconv5(dense_features)  # H/16
@@ -221,8 +210,7 @@ class bts(nn.Module):
         daspp_feat = self.daspp_conv(concat4_daspp)
 
         reduc8x8 = self.reduc8x8(daspp_feat)
-        depth_8x8 = self.lpg8x8(plane_eq_8x8, focal)
-        depth_8x8_scaled = depth_8x8.unsqueeze(1) / self.params.max_depth
+        depth_8x8_scaled = self.integrater.patchIntegration(depthmaplow=reduc8x8, intrinsic=K, scale=3, ang=ang)
         depth_8x8_scaled_ds = torch_nn_func.interpolate(depth_8x8_scaled, scale_factor=0.25, mode='nearest')
 
         upconv3 = self.upconv3(daspp_feat)  # H/4
@@ -231,12 +219,7 @@ class bts(nn.Module):
         iconv3 = self.conv3(concat3)
 
         reduc4x4 = self.reduc4x4(iconv3)
-        plane_normal_4x4 = reduc4x4[:, :3, :, :]
-        plane_normal_4x4 = torch_nn_func.normalize(plane_normal_4x4, 2, 1)
-        plane_dist_4x4 = reduc4x4[:, 3, :, :]
-        plane_eq_4x4 = torch.cat([plane_normal_4x4, plane_dist_4x4.unsqueeze(1)], 1)
-        depth_4x4 = self.lpg4x4(plane_eq_4x4, focal)
-        depth_4x4_scaled = depth_4x4.unsqueeze(1) / self.params.max_depth
+        depth_4x4_scaled = self.integrater.patchIntegration(depthmaplow=reduc4x4, intrinsic=K, scale=2, ang=ang)
         depth_4x4_scaled_ds = torch_nn_func.interpolate(depth_4x4_scaled, scale_factor=0.5, mode='nearest')
 
         upconv2 = self.upconv2(iconv3)  # H/2
@@ -245,20 +228,13 @@ class bts(nn.Module):
         iconv2 = self.conv2(concat2)
 
         reduc2x2 = self.reduc2x2(iconv2)
-        plane_normal_2x2 = reduc2x2[:, :3, :, :]
-        plane_normal_2x2 = torch_nn_func.normalize(plane_normal_2x2, 2, 1)
-        plane_dist_2x2 = reduc2x2[:, 3, :, :]
-        plane_eq_2x2 = torch.cat([plane_normal_2x2, plane_dist_2x2.unsqueeze(1)], 1)
-        depth_2x2 = self.lpg2x2(plane_eq_2x2, focal)
-        depth_2x2_scaled = depth_2x2.unsqueeze(1) / self.params.max_depth
+        depth_2x2_scaled = self.integrater.patchIntegration(depthmaplow=reduc2x2, intrinsic=K, scale=1, ang=ang)
 
         upconv1 = self.upconv1(iconv2)
         reduc1x1 = self.reduc1x1(upconv1)
         concat1 = torch.cat([upconv1, reduc1x1, depth_2x2_scaled, depth_4x4_scaled, depth_8x8_scaled], dim=1)
         iconv1 = self.conv1(concat1)
         final_depth = self.params.max_depth * self.get_depth(iconv1)
-        if self.params.dataset == 'kitti':
-            final_depth = final_depth * focal.view(-1, 1, 1, 1).float() / 715.0873
 
         return depth_8x8_scaled, depth_4x4_scaled, depth_2x2_scaled, reduc1x1, final_depth
 
@@ -325,6 +301,6 @@ class BtsModelShape(nn.Module):
         self.encoder = encoder(params)
         self.decoder = bts(params, self.encoder.feat_out_channels, params.bts_size)
 
-    def forward(self, x, focal):
+    def forward(self, x, K, ang):
         skip_feat = self.encoder(x)
-        return self.decoder(skip_feat, focal)
+        return self.decoder(skip_feat, K, ang)

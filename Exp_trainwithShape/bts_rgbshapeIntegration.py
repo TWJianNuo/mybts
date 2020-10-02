@@ -260,7 +260,7 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
                 eval_sample_batched['image'].cuda(args.gpu, non_blocking=True),
                 eval_sample_batched['shapeh'].cuda(args.gpu, non_blocking=True),
                 eval_sample_batched['shapev'].cuda(args.gpu, non_blocking=True)], dim=1).contiguous())
-            focal = torch.autograd.Variable(eval_sample_batched['focal'].cuda(gpu, non_blocking=True))
+            K = torch.autograd.Variable(eval_sample_batched['K'].cuda(gpu, non_blocking=True))
             gt_depth = eval_sample_batched['depth']
             has_valid_depth = eval_sample_batched['has_valid_depth']
             gt_shape = eval_sample_batched['gt_shape']
@@ -269,7 +269,7 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
                 # print('Invalid depth. continue.')
                 continue
 
-            _, _, _, _, pred_depth = model(image, focal)
+            _, _, _, _, pred_depth = model(image, K)
 
             pred_depth = pred_depth.cpu().numpy().squeeze()
             gt_depth = gt_depth.cpu().numpy().squeeze()
@@ -456,10 +456,12 @@ def main_worker(gpu, ngpus_per_node, args):
                 sample_batched['image'].cuda(args.gpu, non_blocking=True),
                 sample_batched['shapeh'].cuda(args.gpu, non_blocking=True),
                 sample_batched['shapev'].cuda(args.gpu, non_blocking=True)], dim=1).contiguous())
-            focal = torch.autograd.Variable(sample_batched['focal'].cuda(args.gpu, non_blocking=True))
+            K = torch.autograd.Variable(sample_batched['K'].cuda(gpu, non_blocking=True))
             depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
+            ang = torch.cat([sample_batched['shapeh'].cuda(args.gpu, non_blocking=True), sample_batched['shapev'].cuda(args.gpu, non_blocking=True)], dim=1).contiguous()
+            ang = (ang * 0.229 + 0.485 - 0.5) * 2 * np.pi
 
-            lpg8x8, lpg4x4, lpg2x2, reduc1x1, depth_est = model(image, focal)
+            lpg8x8, lpg4x4, lpg2x2, reduc1x1, depth_est = model(image, K, ang)
 
             if args.dataset == 'nyu':
                 mask = depth_gt > 0.1
@@ -503,11 +505,11 @@ def main_worker(gpu, ngpus_per_node, args):
                     for i in range(num_log_images):
                         fig1 = tensor2disp(depth_gt, vmax=30, viewind=i)
                         fig2 = tensor2disp(depth_est, vmax=30, viewind=i)
-                        fig3 = tensor2disp(reduc1x1, percentile=90, viewind=i)
+                        fig3 = tensor2disp(reduc1x1, vmax=1, viewind=i)
 
-                        fig4 = tensor2disp(lpg2x2, percentile=90, viewind=i)
-                        fig5 = tensor2disp(lpg4x4, percentile=90, viewind=i)
-                        fig6 = tensor2disp(lpg8x8, percentile=90, viewind=i)
+                        fig4 = tensor2disp(lpg2x2, vmax=1, viewind=i)
+                        fig5 = tensor2disp(lpg4x4, vmax=1, viewind=i)
+                        fig6 = tensor2disp(lpg8x8, vmax=1, viewind=i)
 
                         figm = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3)], axis=0)
                         figr = np.concatenate([np.array(fig4), np.array(fig5), np.array(fig6)], axis=0)

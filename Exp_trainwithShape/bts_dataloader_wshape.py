@@ -91,7 +91,7 @@ class DataLoadPreprocess(Dataset):
 
     def __getitem__(self, idx):
         sample_path = self.filenames[idx]
-        # sample_path = '2011_10_03/2011_10_03_drive_0034_sync/image_02/data/0000000979.png 2011_10_03/2011_10_03_drive_0034_sync/image_02/0000000979.png 718.856\n'
+        sample_path = '2011_10_03/2011_10_03_drive_0034_sync/image_02/data/0000000979.png 2011_10_03/2011_10_03_drive_0034_sync/image_02/0000000979.png 718.856\n'
         calibpath = os.path.join(self.args.data_path, sample_path.split(' ')[0].split('/')[0], 'calib_cam_to_cam.txt')
         K_org = get_intrinsic(calibpath, camind=2) # We do not use right camera
         focal = K_org[0, 0]
@@ -146,7 +146,7 @@ class DataLoadPreprocess(Dataset):
 
             image, depth_gt, shapeh, shapev, K_cropped = self.random_crop(image, depth_gt, shapeh, shapev, K_cropped, self.args.input_height, self.args.input_width)
             image, depth_gt, shapeh, shapev = self.train_preprocess(image, depth_gt, shapeh, shapev)
-            sample = {'image': image, 'depth': depth_gt, 'focal': focal, 'shapeh': shapeh, 'shapev': shapev}
+            sample = {'image': image, 'depth': depth_gt, 'focal': focal, 'shapeh': shapeh, 'shapev': shapev, 'K': K_cropped}
 
         else:
             if self.mode == 'online_eval':
@@ -196,12 +196,14 @@ class DataLoadPreprocess(Dataset):
                 shapev = shapev[top_margin:top_margin + 352, left_margin:left_margin + 1216, :]
                 if self.mode == 'online_eval' and has_valid_depth:
                     depth_gt = depth_gt[top_margin:top_margin + 352, left_margin:left_margin + 1216, :]
+                K_cropped[0, 2] = K_cropped[0, 2] - left_margin
+                K_cropped[1, 2] = K_cropped[1, 2] - top_margin
 
             if self.mode == 'online_eval':
                 sample = {'image': image, 'depth': depth_gt, 'focal': focal, 'has_valid_depth': has_valid_depth,
-                          'gt_shape': gt_shape, 'shapeh': shapeh, 'shapev': shapev}
+                          'gt_shape': gt_shape, 'shapeh': shapeh, 'shapev': shapev, 'K': K_cropped}
             else:
-                sample = {'image': image, 'focal': focal, 'shapeh': shapeh, 'shapev': shapev}
+                sample = {'image': image, 'focal': focal, 'shapeh': shapeh, 'shapev': shapev, 'K': K_cropped}
 
         if self.transform:
             sample = self.transform(sample)
@@ -278,20 +280,21 @@ class ToTensor(object):
         shapeh = self.normalizeAng(shapeh)
         shapev = self.normalizeAng(shapev)
 
+        K = torch.from_numpy(sample['K']).float()
+
         if self.mode == 'test':
-            return {'image': image, 'focal': focal, 'shapeh': shapeh, 'shapev': shapev}
+            return {'image': image, 'focal': focal, 'shapeh': shapeh, 'shapev': shapev, 'K': K}
 
         depth = sample['depth']
         if self.mode == 'train':
             depth = self.to_tensor(depth)
-            return {'image': image, 'depth': depth, 'focal': focal, 'shapeh': shapeh, 'shapev': shapev}
+            return {'image': image, 'depth': depth, 'focal': focal, 'shapeh': shapeh, 'shapev': shapev, 'K': K}
         else:
             has_valid_depth = sample['has_valid_depth']
             if 'gt_shape' in sample:
-                return {'image': image, 'depth': depth, 'focal': focal, 'has_valid_depth': has_valid_depth,
-                        'gt_shape': sample['gt_shape'], 'shapeh': shapeh, 'shapev': shapev}
+                return {'image': image, 'depth': depth, 'focal': focal, 'has_valid_depth': has_valid_depth, 'gt_shape': sample['gt_shape'], 'shapeh': shapeh, 'shapev': shapev, 'K': K}
             else:
-                return {'image': image, 'depth': depth, 'focal': focal, 'has_valid_depth': has_valid_depth, 'shapeh': shapeh, 'shapev': shapev}
+                return {'image': image, 'depth': depth, 'focal': focal, 'has_valid_depth': has_valid_depth, 'shapeh': shapeh, 'shapev': shapev, 'K': K}
 
     def to_tensor(self, pic):
         if not (_is_pil_image(pic) or _is_numpy_image(pic)):
