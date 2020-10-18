@@ -4,6 +4,7 @@ $ cd ~/workspace/bts
 $ python Exp_trainNuscenes/bts_nuscenes_test.py --model_name bts_nuscenes --encoder densenet161_bts --dataset kitti --data_path pathToNuscenes --filenames_file ../train_test_inputs/nuscenes_test_files_with_gt.txt --input_height 352 --input_width 704 --max_depth 80 --min_depth_eval 1e-3 --max_depth_eval 80 --checkpoint_path pathToCheckPoint
 ```
 Then model can be downloaded from [Here](https://drive.google.com/file/d/1rY4aZOKUtVHcWUjN1W_k5FZLr6UPdnIZ/view?usp=sharing)
+The dataset can be downloaded from [Here](https://drive.google.com/file/d/1CZnhFt__A2eSC3exuDztnoQf7A0_92Ul/view?usp=sharing)
 
 You should see outputs like this:
 ```
