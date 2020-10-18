@@ -22,3 +22,9 @@ Computing errors
 $ cd ~/workspace/bts
 $ CUDA_VISIBLE_DEVICES=0,1 python Exp_trainNuscenes/bts_nuscenes.py --mode train --model_name bts_nuscenes --encoder densenet161_bts --dataset kitti --data_path path-to-Nuscenes_simplified --gt_path path-to-Nuscenes_simplified --filenames_file ../train_test_inputs/nuscenes_train_files_with_gt.txt --batch_size 8 --num_epochs 50 --learning_rate 1e-4 --weight_decay 1e-2 --adam_eps 1e-3 --num_threads 1 --input_height 352 --input_width 704 --max_depth 80 --do_random_rotate --degree 1.0 --log_directory models/ --multiprocessing_distributed --dist_url tcp://127.0.0.1:2345 --log_freq 100 --do_online_eval --eval_freq 50000000 --data_path_eval path-to-Nuscenes_simplified --gt_path_eval path-to-Nuscenes_simplified --filenames_file_eval ../train_test_inputs/nuscenes_test_files_with_gt.txt --min_depth_eval 1e-3 --max_depth_eval 80 --eval_summary_directory models/eval/
 ```
+# Comments on data structure.
+I only use the key frame and front camera image. The depth label is lidar scan projected to image and converted to uint16 data type, identical to kitti semidense groundtruth. 
+To use the depth labels:
+1. use pil.Image.open(depth-image-adrress)
+2. convert to numpy array and float data type
+3. divide it by 256.0
