@@ -470,13 +470,14 @@ def main_worker(gpu, ngpus_per_node, args):
             else:
                 mask = depth_gt > 1.0
 
-            loss = silog_criterion.forward(depth_est, depth_gt, mask.to(torch.bool))
-            loss.backward()
-            for param_group in optimizer.param_groups:
-                current_lr = (args.learning_rate - end_learning_rate) * (1 - global_step / num_total_steps) ** 0.9 + end_learning_rate
-                param_group['lr'] = current_lr
+            with torch.autograd.detect_anomaly():
+                loss = silog_criterion.forward(depth_est, depth_gt, mask.to(torch.bool))
+                loss.backward()
+                for param_group in optimizer.param_groups:
+                    current_lr = (args.learning_rate - end_learning_rate) * (1 - global_step / num_total_steps) ** 0.9 + end_learning_rate
+                    param_group['lr'] = current_lr
 
-            optimizer.step()
+                optimizer.step()
 
             if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
                 print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], lr: {:.12f}, loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, current_lr, loss))
@@ -503,7 +504,6 @@ def main_worker(gpu, ngpus_per_node, args):
                     writer.add_scalar('silog_loss', loss, global_step)
                     writer.add_scalar('learning_rate', current_lr, global_step)
                     writer.add_scalar('var average', var_sum.item()/var_cnt, global_step)
-                    depth_gt = torch.where(depth_gt < 1e-3, depth_gt * 0 + 1e3, depth_gt)
                     for i in range(num_log_images):
                         fig1 = tensor2disp(depth_gt, vmax=30, viewind=i)
                         fig2 = tensor2disp(depth_est, vmax=30, viewind=i)

@@ -91,6 +91,7 @@ class DataLoadPreprocess(Dataset):
 
     def __getitem__(self, idx):
         sample_path = self.filenames[idx]
+        sample_path = '2011_10_03/2011_10_03_drive_0034_sync/image_02/data/0000000979.png 2011_10_03/2011_10_03_drive_0034_sync/image_02/0000000979.png 718.856\n'
         calibpath = os.path.join(self.args.data_path, sample_path.split(' ')[0].split('/')[0], 'calib_cam_to_cam.txt')
         K_org = get_intrinsic(calibpath, camind=2) # We do not use right camera
         focal = K_org[0, 0]
