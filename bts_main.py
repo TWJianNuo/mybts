@@ -281,10 +281,7 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
                 eval_mask[int(0.40810811 * gt_height)-top_margin:int(0.99189189 * gt_height)-top_margin, int(0.03594771 * gt_width)-left_margin:int(0.96405229 * gt_width)-left_margin] = 1
 
             elif args.eigen_crop:
-                if args.dataset == 'kitti':
-                    eval_mask[int(0.3324324 * gt_height)-top_margin:int(0.91351351 * gt_height)-top_margin, int(0.0359477 * gt_width)-left_margin:int(0.96405229 * gt_width)-left_margin] = 1
-                else:
-                    eval_mask[45:471, 41:601] = 1
+                eval_mask[int(0.3324324 * gt_height)-top_margin:int(0.91351351 * gt_height)-top_margin, int(0.0359477 * gt_width)-left_margin:int(0.96405229 * gt_width)-left_margin] = 1
 
             valid_mask = np.logical_and(valid_mask, eval_mask)
 
@@ -397,14 +394,6 @@ def main_worker(gpu, ngpus_per_node, args):
 
     dataloader = BtsDataLoader(args, 'train')
     dataloader_eval = BtsDataLoader(args, 'online_eval')
-
-
-    # model.eval()
-    # eval_measures = online_eval(model, dataloader_eval, gpu, ngpus_per_node)
-    # print(eval_measures)
-    #
-    # import sys
-    # sys.exit()
 
     # Logging
     if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):

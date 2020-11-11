@@ -10,7 +10,7 @@ refsplit = '/home/shengjie/Documents/Project_SemanticDepth/splits/eigen_full_wit
 srcsplit = 'eigen_{}_files_with_gt_modified.txt'
 dstsplit = 'eigen_{}_files_with_instance.txt'
 
-processset = ['train', 'test']
+processset = ['test', 'train']
 for split in processset:
     refentries = readlines(refsplit.format(split))
     srcentries = readlines(srcsplit.format(split))

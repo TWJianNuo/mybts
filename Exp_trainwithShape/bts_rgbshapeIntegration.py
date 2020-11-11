@@ -42,6 +42,7 @@ from tqdm import tqdm
 from Exp_trainwithShape.bts_dataloader_wshape import *
 from util import *
 from Exp_trainwithShape.bts_shape import BtsModelShape
+from integrationModule import IntegrationConstrainFunction
 
 def convert_arg_line_to_args(arg_line):
     for arg in arg_line.split():
@@ -66,7 +67,8 @@ parser.add_argument('--filenames_file',            type=str,   help='path to the
 parser.add_argument('--input_height',              type=int,   help='input height', default=480)
 parser.add_argument('--input_width',               type=int,   help='input width',  default=640)
 parser.add_argument('--max_depth',                 type=float, help='maximum depth in estimation', default=10)
-parser.add_argument('--angdata_path',            type=str,   help='path to the predicted shape', required=True)
+parser.add_argument('--angdata_path',              type=str,   default=None, required=True)
+parser.add_argument('--inslabel_path',             type=str,   default=None, required=True)
 
 # Log and save
 parser.add_argument('--log_directory',             type=str,   help='directory to save checkpoints and summaries', default='')
@@ -87,6 +89,7 @@ parser.add_argument('--num_epochs',                type=int,   help='number of e
 parser.add_argument('--learning_rate',             type=float, help='initial learning rate', default=1e-4)
 parser.add_argument('--end_learning_rate',         type=float, help='end learning rate', default=-1)
 parser.add_argument('--variance_focus',            type=float, help='lambda in paper: [0, 1], higher value more focus on minimizing variance of error', default=0.85)
+parser.add_argument('--constrainw',                type=float, help='lambda in paper: [0, 1], higher value more focus on minimizing variance of error', default=1.00)
 
 # Preprocessing
 parser.add_argument('--do_random_rotate',                      help='if set, will perform random rotation for augmentation', action='store_true')
@@ -256,33 +259,19 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
     eval_measures = torch.zeros(10).cuda(device=gpu)
     for _, eval_sample_batched in enumerate(tqdm(dataloader_eval.data)):
         with torch.no_grad():
-            image = torch.autograd.Variable(torch.cat([
-                eval_sample_batched['image'].cuda(args.gpu, non_blocking=True),
-                eval_sample_batched['shapeh'].cuda(args.gpu, non_blocking=True),
-                eval_sample_batched['shapev'].cuda(args.gpu, non_blocking=True)], dim=1).contiguous())
-            K = torch.autograd.Variable(eval_sample_batched['K'].cuda(gpu, non_blocking=True))
-            gt_depth = eval_sample_batched['depth']
-            has_valid_depth = eval_sample_batched['has_valid_depth']
-            gt_shape = eval_sample_batched['gt_shape']
-            ang = torch.cat([eval_sample_batched['shapeh'].cuda(args.gpu, non_blocking=True), eval_sample_batched['shapev'].cuda(args.gpu, non_blocking=True)], dim=1).contiguous()
-            ang = (ang * 0.229 + 0.485 - 0.5) * 2 * np.pi
+            image = torch.autograd.Variable(eval_sample_batched['image'].cuda(args.gpu, non_blocking=True))
+            gt_depth = torch.autograd.Variable(eval_sample_batched['depth'].cuda(args.gpu, non_blocking=True))
+            focal = torch.autograd.Variable(eval_sample_batched['focal'].cuda(gpu, non_blocking=True))
 
-            if not has_valid_depth:
+            if 'depth' not in eval_sample_batched:
                 # print('Invalid depth. continue.')
                 continue
 
-            _, _, _, _, pred_depth = model(image, K, ang, iseval=True)
+            gt_shape = eval_sample_batched['gtshape']
+            _, _, _, _, pred_depth = model(image, focal)
 
             pred_depth = pred_depth.cpu().numpy().squeeze()
             gt_depth = gt_depth.cpu().numpy().squeeze()
-
-        if args.do_kb_crop:
-            height, width = gt_depth.shape
-            top_margin = int(height - 352)
-            left_margin = int((width - 1216) / 2)
-            pred_depth_uncropped = np.zeros((height, width), dtype=np.float32)
-            pred_depth_uncropped[top_margin:top_margin + 352, left_margin:left_margin + 1216] = pred_depth
-            pred_depth = pred_depth_uncropped
 
         pred_depth[pred_depth < args.min_depth_eval] = args.min_depth_eval
         pred_depth[pred_depth > args.max_depth_eval] = args.max_depth_eval
@@ -292,11 +281,11 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
         valid_mask = np.logical_and(gt_depth > args.min_depth_eval, gt_depth < args.max_depth_eval)
 
         if args.garg_crop or args.eigen_crop:
-            gt_height, gt_width = gt_shape.numpy()[0,0,:]
+            gt_width, gt_height = gt_shape.numpy()[0,:]
             eval_mask = np.zeros(valid_mask.shape)
 
-            top_margin = int(gt_shape[0,0,0] - 352)
-            left_margin = int((gt_shape[0,0,1] - 1216) / 2)
+            top_margin = int(gt_height - 352)
+            left_margin = int((gt_width - 1216) / 2)
             if args.garg_crop:
                 eval_mask[int(0.40810811 * gt_height)-top_margin:int(0.99189189 * gt_height)-top_margin, int(0.03594771 * gt_width)-left_margin:int(0.96405229 * gt_width)-left_margin] = 1
 
@@ -347,7 +336,7 @@ def main_worker(gpu, ngpus_per_node, args):
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
 
     # Create model
-    model = BtsModelShape(args)
+    model = BtsModel(args)
     model.train()
     model.decoder.apply(weights_init_xavier)
     set_misc(model)
@@ -364,12 +353,15 @@ def main_worker(gpu, ngpus_per_node, args):
             model.cuda(args.gpu)
             args.batch_size = int(args.batch_size / ngpus_per_node)
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+            sfnormoptimizer = SurfaceNormalOptimizer(height=args.input_height, width=args.input_width, batch_size=args.batch_size).cuda(args.gpu)
         else:
             model.cuda()
             model = torch.nn.parallel.DistributedDataParallel(model, find_unused_parameters=True)
+            sfnormoptimizer = SurfaceNormalOptimizer(height=args.input_height, width=args.input_width, batch_size=args.batch_size).cuda()
     else:
         model = torch.nn.DataParallel(model)
         model.cuda()
+        sfnormoptimizer = SurfaceNormalOptimizer(height=args.input_height, width=args.input_width, batch_size=args.batch_size).cuda()
 
     if args.distributed:
         print("Model Initialized on GPU: {}".format(args.gpu))
@@ -429,11 +421,11 @@ def main_worker(gpu, ngpus_per_node, args):
             eval_summary_writer = SummaryWriter(eval_summary_path, flush_secs=30)
 
     silog_criterion = silog_loss(variance_focus=args.variance_focus)
+    integrationConstrainFunction = IntegrationConstrainFunction.apply
 
     start_time = time.time()
     duration = 0
 
-    num_log_images = 1
     end_learning_rate = args.end_learning_rate if args.end_learning_rate != -1 else 0.1 * args.learning_rate
 
     var_sum = [var.sum() for var in model.parameters() if var.requires_grad]
@@ -454,24 +446,22 @@ def main_worker(gpu, ngpus_per_node, args):
             optimizer.zero_grad()
             before_op_time = time.time()
 
-            image = torch.autograd.Variable(torch.cat([
-                sample_batched['image'].cuda(args.gpu, non_blocking=True),
-                sample_batched['shapeh'].cuda(args.gpu, non_blocking=True),
-                sample_batched['shapev'].cuda(args.gpu, non_blocking=True)], dim=1).contiguous())
+            image = torch.autograd.Variable(sample_batched['image'].cuda(args.gpu, non_blocking=True))
             K = torch.autograd.Variable(sample_batched['K'].cuda(gpu, non_blocking=True))
             depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
-            ang = torch.cat([sample_batched['shapeh'].cuda(args.gpu, non_blocking=True), sample_batched['shapev'].cuda(args.gpu, non_blocking=True)], dim=1).contiguous()
-            ang = (ang * 0.229 + 0.485 - 0.5) * 2 * np.pi
+            focal = torch.autograd.Variable(sample_batched['focal'].cuda(gpu, non_blocking=True))
+            inslabel = torch.autograd.Variable(sample_batched['inslabel'].cuda(gpu, non_blocking=True))
+            ang = torch.autograd.Variable(torch.cat([sample_batched['angh'], sample_batched['angv']], dim=1).contiguous().cuda(gpu, non_blocking=True))
+            pred_log = sfnormoptimizer.ang2log(ang=ang, intrinsic=K)
 
-            lpg8x8, lpg4x4, lpg2x2, reduc1x1, depth_est = model(image, K, ang)
+            lpg8x8, lpg4x4, lpg2x2, reduc1x1, depth_est = model(image, focal)
 
-            if args.dataset == 'nyu':
-                mask = depth_gt > 0.1
-            else:
-                mask = depth_gt > 1.0
-
+            mask = depth_gt > 0
             with torch.autograd.detect_anomaly():
-                loss = silog_criterion.forward(depth_est, depth_gt, mask.to(torch.bool))
+                shape_constrain = integrationConstrainFunction(pred_log, inslabel, mask.int(), depth_est, args.input_height, args.input_width, args.batch_size)
+                loss_si = silog_criterion.forward(depth_est, depth_gt, mask.to(torch.bool))
+                loss_shape = shape_constrain.mean()
+                loss = loss_si + args.constrainw * loss_shape
                 loss.backward()
                 for param_group in optimizer.param_groups:
                     current_lr = (args.learning_rate - end_learning_rate) * (1 - global_step / num_total_steps) ** 0.9 + end_learning_rate
@@ -499,33 +489,42 @@ def main_worker(gpu, ngpus_per_node, args):
                 print_string = 'GPU: {} | examples/s: {:4.2f} | loss: {:.5f} | var sum: {:.3f} avg: {:.3f} | time elapsed: {:.2f}h | time left: {:.2f}h'
                 print(print_string.format(args.gpu, examples_per_sec, loss, var_sum.item(), var_sum.item()/var_cnt, time_sofar, training_time_left))
 
-                if not args.multiprocessing_distributed or (args.multiprocessing_distributed
-                                                            and args.rank % ngpus_per_node == 0):
-                    writer.add_scalar('silog_loss', loss, global_step)
+                if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
+                    writer.add_scalar('silog_loss', loss_si, global_step)
+                    writer.add_scalar('constrain_loss', loss_shape, global_step)
                     writer.add_scalar('learning_rate', current_lr, global_step)
                     writer.add_scalar('var average', var_sum.item()/var_cnt, global_step)
-                    for i in range(num_log_images):
-                        fig1 = tensor2disp(depth_gt, vmax=30, viewind=i)
-                        fig2 = tensor2disp(depth_est, vmax=30, viewind=i)
-                        fig3 = tensor2disp(reduc1x1, vmax=1, viewind=i)
 
-                        fig4 = tensor2disp(lpg2x2, vmax=1, viewind=i)
-                        fig5 = tensor2disp(lpg4x4, vmax=1, viewind=i)
-                        fig6 = tensor2disp(lpg8x8, vmax=1, viewind=i)
+                    i = 0
+                    depth_gtvls = torch.clone(depth_gt)
+                    depth_gtvls[depth_gtvls == 0] = float("Inf")
+                    fig1 = tensor2disp(1 / depth_gtvls, vmax=0.15, viewind=i)
+                    fig2 = tensor2disp(1 / depth_est, vmax=0.15, viewind=i)
+                    fig3 = tensor2disp(shape_constrain, vmax=2, viewind=i)
 
-                        figm = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3)], axis=0)
-                        figr = np.concatenate([np.array(fig4), np.array(fig5), np.array(fig6)], axis=0)
+                    figrgb = tensor2rgb(sample_batched['image'], viewind=i)
+                    instanceprednp = inslabel.cpu().numpy()[i, 0, :, :]
 
-                        minang = - np.pi / 3 * 2
-                        maxang = 2 * np.pi - np.pi / 3 * 2
-                        figrgb = tensor2rgb(sample_batched['image'], viewind=i)
-                        figshapeh = tensor2disp(((sample_batched['shapeh'] * 0.229 + 0.485) - 0.5) * 2 * np.pi - minang, viewind=i, vmax=maxang)
-                        figshapev = tensor2disp(((sample_batched['shapev'] * 0.229 + 0.485) - 0.5) * 2 * np.pi - minang, viewind=i, vmax=maxang)
-                        figl = np.concatenate([np.array(figrgb), np.array(figshapeh), np.array(figshapev)], axis=0)
+                    coloredimg = np.zeros_like(np.array(figrgb))
+                    ratio = 0.3
+                    for k in np.unique(instanceprednp):
+                        if k > 0:
+                            selector = instanceprednp == k
+                            coloredimg[selector, :] = np.repeat((np.random.random([1, 3]) * 255).astype(np.uint8), np.sum(selector), axis=0)
+                    combined = np.array(figrgb).astype(np.float) * (1 - ratio) + coloredimg.astype(np.float) * ratio
+                    combined = combined.astype(np.uint8)
 
-                        figcombined = np.concatenate([np.array(figl), np.array(figm), np.array(figr)], axis=1)
-                        writer.add_image('oview/image/{}'.format(i), (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), global_step)
+                    normref = sfnormoptimizer.ang2normal(ang=ang, intrinsic=K)
+                    normpred = sfnormoptimizer.depth2norm(depthMap=depth_est, intrinsic=K)
 
+                    fignormref = tensor2rgb_normal((normref + 1) / 2, viewind=i)
+                    fignormpred = tensor2rgb_normal((normpred + 1) / 2, viewind=i)
+
+                    figm = np.concatenate([np.array(combined), np.array(fig1), np.array(fig2)], axis=0)
+                    figr = np.concatenate([np.array(fignormref), np.array(fignormpred), np.array(fig3)], axis=0)
+
+                    figcombined = np.concatenate([np.array(figm), np.array(figr)], axis=1)
+                    writer.add_image('oview/image', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), global_step)
                     writer.flush()
 
             if not args.do_online_eval and global_step and global_step % args.save_freq == 0:

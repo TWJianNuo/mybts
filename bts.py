@@ -47,6 +47,14 @@ class silog_loss(nn.Module):
         d = torch.log(depth_est[mask]) - torch.log(depth_gt[mask])
         return torch.sqrt((d ** 2).mean() - self.variance_focus * (d.mean() ** 2)) * 10.0
 
+class integration_loss(nn.Module):
+    def __init__(self):
+        super(integration_loss, self).__init__()
+
+    def forward(self, depth_est, depth_gt, mask):
+        d = torch.log(depth_est[mask]) - torch.log(depth_gt[mask])
+        return torch.sqrt((d ** 2).mean() - self.variance_focus * (d.mean() ** 2)) * 10.0
+
 
 class atrous_conv(nn.Sequential):
     def __init__(self, in_channels, out_channels, dilation, apply_bn_first=True):
