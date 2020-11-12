@@ -423,6 +423,11 @@ def main_worker(gpu, ngpus_per_node, args):
     num_total_steps = args.num_epochs * steps_per_epoch
     epoch = global_step // steps_per_epoch
 
+    besta1 = -1e10
+    bestabsrel = 1e10
+    besta1performance = None
+    bestabsrelperformance = None
+
     while epoch < args.num_epochs:
         if args.distributed:
             dataloader.train_sampler.set_epoch(epoch)
@@ -498,6 +503,20 @@ def main_worker(gpu, ngpus_per_node, args):
                 model.eval()
                 eval_measures = online_eval(model, dataloader_eval, gpu, ngpus_per_node)
                 if eval_measures is not None:
+                    if besta1 < eval_measures[6]:
+                        besta1performance = eval_measures
+                        besta1 = eval_measures[6]
+                    if bestabsrel > eval_measures[1]:
+                        bestabsrelperformance = eval_measures
+                        bestabsrel = eval_measures[1]
+
+                    print("\nBest A1 Performance")
+                    print(("{:>8} | " * 9).format(*eval_metrics))
+                    print(("&{: 8.3f}  " * 9).format(*besta1performance.tolist()) + "\\\\")
+                    print("\nBest Absrel Performance")
+                    print(("{:>8} | " * 9).format(*eval_metrics))
+                    print(("&{: 8.3f}  " * 9).format(*bestabsrelperformance.tolist()) + "\\\\")
+
                     for i in range(9):
                         eval_summary_writer.add_scalar(eval_metrics[i], eval_measures[i].cpu(), int(global_step))
                         measure = eval_measures[i]
@@ -510,7 +529,7 @@ def main_worker(gpu, ngpus_per_node, args):
                             old_best = best_eval_measures_higher_better[i-6].item()
                             best_eval_measures_higher_better[i-6] = measure.item()
                             is_best = True
-                        if is_best:
+                        if is_best and (i == 1 or i == 6):
                             old_best_step = best_eval_steps[i]
                             old_best_name = '/model-{}-best_{}_{:.5f}'.format(old_best_step, eval_metrics[i], old_best)
                             model_path = args.log_directory + '/' + args.model_name + old_best_name

@@ -68,13 +68,13 @@ if sys.argv.__len__() == 2:
 else:
     args = parser.parse_args()
 
-model_dir = os.path.dirname(args.checkpoint_path)
-sys.path.append(model_dir)
-
-for key, val in vars(__import__(args.model_name)).items():
-    if key.startswith('__') and key.endswith('__'):
-        continue
-    vars()[key] = val
+# model_dir = os.path.dirname(args.checkpoint_path)
+# sys.path.append(model_dir)
+#
+# for key, val in vars(__import__(args.model_name)).items():
+#     if key.startswith('__') and key.endswith('__'):
+#         continue
+#     vars()[key] = val
 
 
 def get_num_lines(file_path):

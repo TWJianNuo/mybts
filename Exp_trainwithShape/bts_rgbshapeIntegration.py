@@ -254,7 +254,6 @@ def set_misc(model):
             if any(x in name2 for x in fixing_layers):
                 parameters.requires_grad = False
 
-
 def online_eval(model, dataloader_eval, gpu, ngpus):
     eval_measures = torch.zeros(10).cuda(device=gpu)
     for _, eval_sample_batched in enumerate(tqdm(dataloader_eval.data)):

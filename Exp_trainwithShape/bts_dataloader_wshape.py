@@ -100,6 +100,9 @@ class DataLoadPreprocess(Dataset):
         if mode == 'online_eval':
             with open(args.filenames_file_eval, 'r') as f:
                 self.filenames = f.readlines()
+            if args.limitvalnum is not None:
+                random.shuffle(self.filenames)
+                self.filenames = self.filenames[0:args.limitvalnum]
         else:
             with open(args.filenames_file, 'r') as f:
                 self.filenames = f.readlines()
