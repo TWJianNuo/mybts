@@ -570,7 +570,7 @@ def main_worker(gpu, ngpus_per_node, args):
                             old_best = best_eval_measures_higher_better[i-6].item()
                             best_eval_measures_higher_better[i-6] = measure.item()
                             is_best = True
-                        if is_best:
+                        if is_best and (i == 1 or i == 6):
                             old_best_step = best_eval_steps[i]
                             old_best_name = '/model-{}-best_{}_{:.5f}'.format(old_best_step, eval_metrics[i], old_best)
                             model_path = args.log_directory + '/' + args.model_name + old_best_name
