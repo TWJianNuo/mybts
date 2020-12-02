@@ -19,6 +19,7 @@ import torch.nn as nn
 import torch.nn.functional as torch_nn_func
 import math
 from collections import namedtuple
+import torch.distributed as dist
 
 # This sets the batch norm layers in pytorch as if {'is_training': False, 'scale': True} in tensorflow
 def bn_init_as_tf(m):
@@ -141,14 +142,21 @@ class bts(nn.Module):
         super(bts, self).__init__()
         self.params = params
 
+        if dist.get_world_size() == 1 or (not params.usesyncnorm):
+            BNlayer = nn.BatchNorm2d
+            print("Init Batch Norm layer as nn.BatchNorm2d")
+        else:
+            BNlayer = nn.SyncBatchNorm
+            print("Init Batch Norm layer as nn.SyncBatchNorm")
+
         self.upconv5    = upconv(feat_out_channels[4], num_features)
-        self.bn5        = nn.BatchNorm2d(num_features, momentum=0.01, affine=True, eps=1.1e-5)
+        self.bn5        = BNlayer(num_features, momentum=0.01, affine=True, eps=1.1e-5)
         
         self.conv5      = torch.nn.Sequential(nn.Conv2d(num_features + feat_out_channels[3], num_features, 3, 1, 1, bias=False), nn.ELU())
         self.upconv4    = upconv(num_features, num_features // 2)
-        self.bn4        = nn.BatchNorm2d(num_features // 2, momentum=0.01, affine=True, eps=1.1e-5)
+        self.bn4        = BNlayer(num_features // 2, momentum=0.01, affine=True, eps=1.1e-5)
         self.conv4      = torch.nn.Sequential(nn.Conv2d(num_features // 2 + feat_out_channels[2], num_features // 2, 3, 1, 1, bias=False), nn.ELU())
-        self.bn4_2      = nn.BatchNorm2d(num_features // 2, momentum=0.01, affine=True, eps=1.1e-5)
+        self.bn4_2      = BNlayer(num_features // 2, momentum=0.01, affine=True, eps=1.1e-5)
         
         self.daspp_3    = atrous_conv(num_features // 2, num_features // 4, 3, apply_bn_first=False)
         self.daspp_6    = atrous_conv(num_features // 2 + num_features // 4 + feat_out_channels[2], num_features // 4, 6)
@@ -160,14 +168,14 @@ class bts(nn.Module):
         self.lpg8x8     = local_planar_guidance(8)
         
         self.upconv3    = upconv(num_features // 4, num_features // 4)
-        self.bn3        = nn.BatchNorm2d(num_features // 4, momentum=0.01, affine=True, eps=1.1e-5)
+        self.bn3        = BNlayer(num_features // 4, momentum=0.01, affine=True, eps=1.1e-5)
         self.conv3      = torch.nn.Sequential(nn.Conv2d(num_features // 4 + feat_out_channels[1] + 1, num_features // 4, 3, 1, 1, bias=False),
                                               nn.ELU())
         self.reduc4x4   = reduction_1x1(num_features // 4, num_features // 8, self.params.max_depth)
         self.lpg4x4     = local_planar_guidance(4)
         
         self.upconv2    = upconv(num_features // 4, num_features // 8)
-        self.bn2        = nn.BatchNorm2d(num_features // 8, momentum=0.01, affine=True, eps=1.1e-5)
+        self.bn2        = BNlayer(num_features // 8, momentum=0.01, affine=True, eps=1.1e-5)
         self.conv2      = torch.nn.Sequential(nn.Conv2d(num_features // 8 + feat_out_channels[0] + 1, num_features // 8, 3, 1, 1, bias=False), nn.ELU())
         
         self.reduc2x2   = reduction_1x1(num_features // 8, num_features // 16, self.params.max_depth)
