@@ -18,9 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as torch_nn_func
 import math
-
 from collections import namedtuple
-
 
 # This sets the batch norm layers in pytorch as if {'is_training': False, 'scale': True} in tensorflow
 def bn_init_as_tf(m):
@@ -33,9 +31,10 @@ def bn_init_as_tf(m):
 
 def weights_init_xavier(m):
     if isinstance(m, nn.Conv2d):
-        torch.nn.init.xavier_uniform_(m.weight)
-        if m.bias is not None:
-            torch.nn.init.zeros_(m.bias)
+        if m.weight.requires_grad == True:
+            torch.nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                torch.nn.init.zeros_(m.bias)
             
 
 class silog_loss(nn.Module):
@@ -46,15 +45,6 @@ class silog_loss(nn.Module):
     def forward(self, depth_est, depth_gt, mask):
         d = torch.log(depth_est[mask]) - torch.log(depth_gt[mask])
         return torch.sqrt((d ** 2).mean() - self.variance_focus * (d.mean() ** 2)) * 10.0
-
-class integration_loss(nn.Module):
-    def __init__(self):
-        super(integration_loss, self).__init__()
-
-    def forward(self, depth_est, depth_gt, mask):
-        d = torch.log(depth_est[mask]) - torch.log(depth_gt[mask])
-        return torch.sqrt((d ** 2).mean() - self.variance_focus * (d.mean() ** 2)) * 10.0
-
 
 class atrous_conv(nn.Sequential):
     def __init__(self, in_channels, out_channels, dilation, apply_bn_first=True):
@@ -87,7 +77,6 @@ class upconv(nn.Module):
         out = self.elu(out)
         return out
 
-
 class reduction_1x1(nn.Sequential):
     def __init__(self, num_in_filters, num_out_filters, max_depth, is_final=False):
         super(reduction_1x1, self).__init__()        
@@ -99,18 +88,12 @@ class reduction_1x1(nn.Sequential):
         while num_out_filters >= 4:
             if num_out_filters < 8:
                 if self.is_final:
-                    self.reduc.add_module('final', torch.nn.Sequential(nn.Conv2d(num_in_filters, out_channels=1, bias=False,
-                                                                                 kernel_size=1, stride=1, padding=0),
-                                                                       nn.Sigmoid()))
+                    self.reduc.add_module('final', torch.nn.Sequential(nn.Conv2d(num_in_filters, out_channels=1, bias=False, kernel_size=1, stride=1, padding=0), nn.Sigmoid()))
                 else:
-                    self.reduc.add_module('plane_params', torch.nn.Conv2d(num_in_filters, out_channels=3, bias=False,
-                                                                          kernel_size=1, stride=1, padding=0))
+                    self.reduc.add_module('plane_params', torch.nn.Conv2d(num_in_filters, out_channels=3, bias=False, kernel_size=1, stride=1, padding=0))
                 break
             else:
-                self.reduc.add_module('inter_{}_{}'.format(num_in_filters, num_out_filters),
-                                      torch.nn.Sequential(nn.Conv2d(in_channels=num_in_filters, out_channels=num_out_filters,
-                                                                    bias=False, kernel_size=1, stride=1, padding=0),
-                                                          nn.ELU()))
+                self.reduc.add_module('inter_{}_{}'.format(num_in_filters, num_out_filters), torch.nn.Sequential(nn.Conv2d(in_channels=num_in_filters, out_channels=num_out_filters, bias=False, kernel_size=1, stride=1, padding=0), nn.ELU()))
 
             num_in_filters = num_out_filters
             num_out_filters = num_out_filters // 2
@@ -161,12 +144,10 @@ class bts(nn.Module):
         self.upconv5    = upconv(feat_out_channels[4], num_features)
         self.bn5        = nn.BatchNorm2d(num_features, momentum=0.01, affine=True, eps=1.1e-5)
         
-        self.conv5      = torch.nn.Sequential(nn.Conv2d(num_features + feat_out_channels[3], num_features, 3, 1, 1, bias=False),
-                                              nn.ELU())
+        self.conv5      = torch.nn.Sequential(nn.Conv2d(num_features + feat_out_channels[3], num_features, 3, 1, 1, bias=False), nn.ELU())
         self.upconv4    = upconv(num_features, num_features // 2)
         self.bn4        = nn.BatchNorm2d(num_features // 2, momentum=0.01, affine=True, eps=1.1e-5)
-        self.conv4      = torch.nn.Sequential(nn.Conv2d(num_features // 2 + feat_out_channels[2], num_features // 2, 3, 1, 1, bias=False),
-                                              nn.ELU())
+        self.conv4      = torch.nn.Sequential(nn.Conv2d(num_features // 2 + feat_out_channels[2], num_features // 2, 3, 1, 1, bias=False), nn.ELU())
         self.bn4_2      = nn.BatchNorm2d(num_features // 2, momentum=0.01, affine=True, eps=1.1e-5)
         
         self.daspp_3    = atrous_conv(num_features // 2, num_features // 4, 3, apply_bn_first=False)
@@ -174,8 +155,7 @@ class bts(nn.Module):
         self.daspp_12   = atrous_conv(num_features + feat_out_channels[2], num_features // 4, 12)
         self.daspp_18   = atrous_conv(num_features + num_features // 4 + feat_out_channels[2], num_features // 4, 18)
         self.daspp_24   = atrous_conv(num_features + num_features // 2 + feat_out_channels[2], num_features // 4, 24)
-        self.daspp_conv = torch.nn.Sequential(nn.Conv2d(num_features + num_features // 2 + num_features // 4, num_features // 4, 3, 1, 1, bias=False),
-                                              nn.ELU())
+        self.daspp_conv = torch.nn.Sequential(nn.Conv2d(num_features + num_features // 2 + num_features // 4, num_features // 4, 3, 1, 1, bias=False), nn.ELU())
         self.reduc8x8   = reduction_1x1(num_features // 4, num_features // 4, self.params.max_depth)
         self.lpg8x8     = local_planar_guidance(8)
         
@@ -188,18 +168,15 @@ class bts(nn.Module):
         
         self.upconv2    = upconv(num_features // 4, num_features // 8)
         self.bn2        = nn.BatchNorm2d(num_features // 8, momentum=0.01, affine=True, eps=1.1e-5)
-        self.conv2      = torch.nn.Sequential(nn.Conv2d(num_features // 8 + feat_out_channels[0] + 1, num_features // 8, 3, 1, 1, bias=False),
-                                              nn.ELU())
+        self.conv2      = torch.nn.Sequential(nn.Conv2d(num_features // 8 + feat_out_channels[0] + 1, num_features // 8, 3, 1, 1, bias=False), nn.ELU())
         
         self.reduc2x2   = reduction_1x1(num_features // 8, num_features // 16, self.params.max_depth)
         self.lpg2x2     = local_planar_guidance(2)
         
         self.upconv1    = upconv(num_features // 8, num_features // 16)
         self.reduc1x1   = reduction_1x1(num_features // 16, num_features // 32, self.params.max_depth, is_final=True)
-        self.conv1      = torch.nn.Sequential(nn.Conv2d(num_features // 16 + 4, num_features // 16, 3, 1, 1, bias=False),
-                                              nn.ELU())
-        self.get_depth  = torch.nn.Sequential(nn.Conv2d(num_features // 16, 1, 3, 1, 1, bias=False),
-                                              nn.Sigmoid())
+        self.conv1      = torch.nn.Sequential(nn.Conv2d(num_features // 16 + 4, num_features // 16, 3, 1, 1, bias=False), nn.ELU())
+        self.get_depth  = torch.nn.Sequential(nn.Conv2d(num_features // 16, 1, 3, 1, 1, bias=False), nn.Sigmoid())
 
     def forward(self, features, focal):
         skip0, skip1, skip2, skip3 = features[1], features[2], features[3], features[4]
@@ -302,16 +279,6 @@ class encoder(nn.Module):
             self.base_model = models.resnext101_32x8d(pretrained=True)
             self.feat_names = ['relu', 'layer1', 'layer2', 'layer3', 'layer4']
             self.feat_out_channels = [64, 256, 512, 1024, 2048]
-        elif params.encoder == 'densenet121_bts_rgbshape':
-            from Exp_trainwithShape.densenet import densenet121rgbshape
-            self.base_model = densenet121rgbshape(pretrained=True, ninput=5).features
-            self.feat_names = ['relu0', 'pool0', 'transition1', 'transition2', 'norm5']
-            self.feat_out_channels = [64, 64, 128, 256, 1024]
-        elif params.encoder == 'densenet161_bts_rgbshape':
-            from Exp_trainwithShape.densenet import densenet161rgbshape
-            self.base_model = densenet161rgbshape(pretrained=True, ninput=5).features
-            self.feat_names = ['relu0', 'pool0', 'transition1', 'transition2', 'norm5']
-            self.feat_out_channels = [96, 96, 192, 384, 2208]
         else:
             print('Not supported encoder: {}'.format(params.encoder))
 

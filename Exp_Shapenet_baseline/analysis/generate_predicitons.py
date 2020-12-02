@@ -14,9 +14,9 @@ import matplotlib
 import matplotlib.cm
 from tqdm import tqdm
 
-from Exp_trainwithShape.bts_dataloader_wshape import *
+from Exp_Shapenet_baseline.bts_dataloader_wshape import *
 from util import *
-from Exp_trainwithShape.bts_shape import BtsModelShape
+from Exp_Shapenet_baseline.bts_shape import BtsModelShape
 from integrationModule import IntegrationConstrainFunction
 import glob
 

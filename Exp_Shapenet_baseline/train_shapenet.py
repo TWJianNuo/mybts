@@ -14,33 +14,27 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>
 
-import os,sys,inspect
-currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-parentdir = os.path.dirname(currentdir)
-sys.path.insert(0,parentdir)
+import os
 
 import time
 import argparse
 import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__))) # location of src
 
 import torch.backends.cudnn as cudnn
 import torch.multiprocessing as mp
-
-import torch
-version_num = torch.__version__
-version_num = ''.join(i for i in version_num if i.isdigit())
-version_num = int(version_num.ljust(10, '0'))
-if version_num > 1100000000:
-    from torch.utils.tensorboard import SummaryWriter
-else:
-    from tensorboardX import SummaryWriter
 
 import matplotlib
 import matplotlib.cm
 from tqdm import tqdm
 
-from Exp_trainwithShape.bts_dataloader_wshape import *
+from Exp_Shapenet_baseline.shapedataset import KittiShapeDataLoader, KittiShapeDataset
 from util import *
+from Exp_Shapenet_baseline.shapenet import ShapeNet
+from torchvision import transforms
+import torch.utils.data.distributed
+import torch.distributed as dist
+from torch.utils.tensorboard import SummaryWriter
 
 def convert_arg_line_to_args(arg_line):
     for arg in arg_line.split():
@@ -48,15 +42,12 @@ def convert_arg_line_to_args(arg_line):
             continue
         yield arg
 
-
 parser = argparse.ArgumentParser(description='BTS PyTorch implementation.', fromfile_prefix_chars='@')
 parser.convert_arg_line_to_args = convert_arg_line_to_args
 
 parser.add_argument('--mode',                      type=str,   help='train or test', default='train')
 parser.add_argument('--model_name',                type=str,   help='model name', default='bts_eigen_v2')
-parser.add_argument('--encoder',                   type=str,   help='type of encoder, desenet121_bts, densenet161_bts, '
-                                                                    'resnet101_bts, resnet50_bts, resnext50_bts or resnext101_bts',
-                                                               default='densenet161_bts')
+parser.add_argument('--encoder',                   type=str,   help='type of encoder, desenet121_bts, densenet161_bts, resnet101_bts, resnet50_bts, resnext50_bts or resnext101_bts', default='densenet161_bts')
 # Dataset
 parser.add_argument('--dataset',                   type=str,   help='dataset to train on, kitti or nyu', default='nyu')
 parser.add_argument('--data_path',                 type=str,   help='path to the data', required=True)
@@ -64,8 +55,6 @@ parser.add_argument('--gt_path',                   type=str,   help='path to the
 parser.add_argument('--filenames_file',            type=str,   help='path to the filenames text file', required=True)
 parser.add_argument('--input_height',              type=int,   help='input height', default=480)
 parser.add_argument('--input_width',               type=int,   help='input width',  default=640)
-parser.add_argument('--max_depth',                 type=float, help='maximum depth in estimation', default=10)
-parser.add_argument('--angdata_path',            type=str,   help='path to the predicted shape', required=True)
 
 # Log and save
 parser.add_argument('--log_directory',             type=str,   help='directory to save checkpoints and summaries', default='')
@@ -84,17 +73,17 @@ parser.add_argument('--adam_eps',                  type=float, help='epsilon in 
 parser.add_argument('--batch_size',                type=int,   help='batch size', default=4)
 parser.add_argument('--num_epochs',                type=int,   help='number of epochs', default=50)
 parser.add_argument('--learning_rate',             type=float, help='initial learning rate', default=1e-4)
-parser.add_argument('--end_learning_rate',         type=float, help='end learning rate', default=-1)
-parser.add_argument('--variance_focus',            type=float, help='lambda in paper: [0, 1], higher value more focus on minimizing variance of error', default=0.85)
+parser.add_argument('--end_learning_rate',         type=float, default=-1)
+parser.add_argument('--angw',                      type=float, default=0)
+parser.add_argument('--vlossw',                    type=float, default=0.2)
+parser.add_argument('--sclw',                      type=float, default=0)
 
 # Preprocessing
-parser.add_argument('--do_random_rotate',                      help='if set, will perform random rotation for augmentation', action='store_true')
-parser.add_argument('--degree',                    type=float, help='random rotation maximum degree', default=2.5)
 parser.add_argument('--do_kb_crop',                            help='if set, crop input images as kitti benchmark images', action='store_true')
 parser.add_argument('--use_right',                             help='if set, will randomly use right images when train on KITTI', action='store_true')
 
 # Multi-gpu training
-parser.add_argument('--num_threads',               type=int,   help='number of threads to use for data loading', default=1)
+parser.add_argument('--num_workers',               type=int,   help='number of threads to use for data loading', default=1)
 parser.add_argument('--world_size',                type=int,   help='number of nodes for distributed training', default=1)
 parser.add_argument('--rank',                      type=int,   help='node rank for distributed training', default=0)
 parser.add_argument('--dist_url',                  type=str,   help='url used to set up distributed training', default='tcp://127.0.0.1:1234')
@@ -109,13 +98,7 @@ parser.add_argument('--do_online_eval',                        help='if set, per
 parser.add_argument('--data_path_eval',            type=str,   help='path to the data for online evaluation', required=False)
 parser.add_argument('--gt_path_eval',              type=str,   help='path to the groundtruth data for online evaluation', required=False)
 parser.add_argument('--filenames_file_eval',       type=str,   help='path to the filenames text file for online evaluation', required=False)
-parser.add_argument('--min_depth_eval',            type=float, help='minimum depth for evaluation', default=1e-3)
-parser.add_argument('--max_depth_eval',            type=float, help='maximum depth for evaluation', default=80)
-parser.add_argument('--eigen_crop',                            help='if set, crops according to Eigen NIPS14', action='store_true')
-parser.add_argument('--garg_crop',                             help='if set, crops according to Garg  ECCV16', action='store_true')
 parser.add_argument('--eval_freq',                 type=int,   help='Online evaluation frequency in global steps', default=500)
-parser.add_argument('--eval_summary_directory',    type=str,   help='output directory for eval summary,'
-                                                                    'if empty outputs to checkpoint folder', default='')
 
 if sys.argv.__len__() == 2:
     arg_filename_with_prefix = '@' + sys.argv[1]
@@ -136,14 +119,10 @@ elif args.mode == 'train' and args.checkpoint_path:
             continue
         vars()[key] = val
 
-
 inv_normalize = transforms.Normalize(
     mean=[-0.485/0.229, -0.456/0.224, -0.406/0.225],
     std=[1/0.229, 1/0.224, 1/0.225]
 )
-
-eval_metrics = ['silog', 'abs_rel', 'log10', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3']
-
 
 def compute_errors(gt, pred):
     thresh = np.maximum((gt / pred), (pred / gt))
@@ -168,7 +147,6 @@ def compute_errors(gt, pred):
 
     return [silog, abs_rel, log10, rms, sq_rel, log_rms, d1, d2, d3]
 
-
 def block_print():
     sys.stdout = open(os.devnull, 'w')
 
@@ -176,13 +154,11 @@ def block_print():
 def enable_print():
     sys.stdout = sys.__stdout__
 
-
 def get_num_lines(file_path):
     f = open(file_path, 'r')
     lines = f.readlines()
     f.close()
     return len(lines)
-
 
 def colorize(value, vmin=None, vmax=None, cmap='Greys'):
     value = value.cpu().numpy()[:, :, :]
@@ -203,7 +179,6 @@ def colorize(value, vmin=None, vmax=None, cmap='Greys'):
 
     return img.transpose((2, 0, 1))
 
-
 def normalize_result(value, vmin=None, vmax=None):
     value = value.cpu().numpy()[0, :, :]
 
@@ -216,7 +191,6 @@ def normalize_result(value, vmin=None, vmax=None):
         value = value * 0.
 
     return np.expand_dims(value, 0)
-
 
 def set_misc(model):
     if args.bn_no_track_stats:
@@ -246,70 +220,25 @@ def set_misc(model):
         if not 'encoder' in name:
             continue
         for name2, parameters in child.named_parameters():
-            # print(name, name2)
             if any(x in name2 for x in fixing_layers):
                 parameters.requires_grad = False
 
-
-def online_eval(model, dataloader_eval, gpu, ngpus):
-    eval_measures = torch.zeros(10).cuda(device=gpu)
+def online_eval(model, normoptizer_eval, dataloader_eval, gpu, ngpus):
+    eval_measures = torch.zeros(2).cuda(device=gpu)
     for _, eval_sample_batched in enumerate(tqdm(dataloader_eval.data)):
         with torch.no_grad():
-            image = torch.autograd.Variable(torch.cat([
-                eval_sample_batched['image'].cuda(args.gpu, non_blocking=True),
-                eval_sample_batched['shapeh'].cuda(args.gpu, non_blocking=True),
-                eval_sample_batched['shapev'].cuda(args.gpu, non_blocking=True)], dim=1).contiguous())
+            image = torch.autograd.Variable(eval_sample_batched['image'].cuda(args.gpu, non_blocking=True))
+            K = torch.autograd.Variable(eval_sample_batched['K'].cuda(gpu, non_blocking=True))
+            depth_gt = torch.autograd.Variable(eval_sample_batched['depth'].cuda(args.gpu, non_blocking=True))
 
-            focal = torch.autograd.Variable(eval_sample_batched['focal'].cuda(gpu, non_blocking=True))
-            gt_depth = eval_sample_batched['depth']
-            has_valid_depth = eval_sample_batched['has_valid_depth']
-            gt_shape = eval_sample_batched['gt_shape']
-
-            if not has_valid_depth:
-                # print('Invalid depth. continue.')
+            if 'depth' not in eval_sample_batched:
                 continue
 
-            _, _, _, _, pred_depth = model(image, focal)
+            _, _, _, _, pred_shape = model(image)
+            loss = normoptizer_eval.intergrationloss_ang_validation(ang=pred_shape, intrinsic=K, depthMap=depth_gt)
 
-            pred_depth = pred_depth.cpu().numpy().squeeze()
-            gt_depth = gt_depth.cpu().numpy().squeeze()
-
-        if args.do_kb_crop:
-            height, width = gt_depth.shape
-            top_margin = int(height - 352)
-            left_margin = int((width - 1216) / 2)
-            pred_depth_uncropped = np.zeros((height, width), dtype=np.float32)
-            pred_depth_uncropped[top_margin:top_margin + 352, left_margin:left_margin + 1216] = pred_depth
-            pred_depth = pred_depth_uncropped
-
-        pred_depth[pred_depth < args.min_depth_eval] = args.min_depth_eval
-        pred_depth[pred_depth > args.max_depth_eval] = args.max_depth_eval
-        pred_depth[np.isinf(pred_depth)] = args.max_depth_eval
-        pred_depth[np.isnan(pred_depth)] = args.min_depth_eval
-
-        valid_mask = np.logical_and(gt_depth > args.min_depth_eval, gt_depth < args.max_depth_eval)
-
-        if args.garg_crop or args.eigen_crop:
-            gt_height, gt_width = gt_shape.numpy()[0,0,:]
-            eval_mask = np.zeros(valid_mask.shape)
-
-            top_margin = int(gt_shape[0,0,0] - 352)
-            left_margin = int((gt_shape[0,0,1] - 1216) / 2)
-            if args.garg_crop:
-                eval_mask[int(0.40810811 * gt_height)-top_margin:int(0.99189189 * gt_height)-top_margin, int(0.03594771 * gt_width)-left_margin:int(0.96405229 * gt_width)-left_margin] = 1
-
-            elif args.eigen_crop:
-                if args.dataset == 'kitti':
-                    eval_mask[int(0.3324324 * gt_height)-top_margin:int(0.91351351 * gt_height)-top_margin, int(0.0359477 * gt_width)-left_margin:int(0.96405229 * gt_width)-left_margin] = 1
-                else:
-                    eval_mask[45:471, 41:601] = 1
-
-            valid_mask = np.logical_and(valid_mask, eval_mask)
-
-        measures = compute_errors(gt_depth[valid_mask], pred_depth[valid_mask])
-
-        eval_measures[:9] += torch.tensor(measures).cuda(device=gpu)
-        eval_measures[9] += 1
+        eval_measures[0] += loss
+        eval_measures[1] += 1
 
     if args.multiprocessing_distributed:
         group = dist.new_group([i for i in range(ngpus)])
@@ -317,19 +246,10 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
 
     if not args.multiprocessing_distributed or gpu == 0:
         eval_measures_cpu = eval_measures.cpu()
-        cnt = eval_measures_cpu[9].item()
-        eval_measures_cpu /= cnt
-        print('Computing errors for {} eval samples'.format(int(cnt)))
-        print("{:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}".format('silog', 'abs_rel', 'log10', 'rms',
-                                                                                     'sq_rel', 'log_rms', 'd1', 'd2',
-                                                                                     'd3'))
-        for i in range(8):
-            print('{:7.3f}, '.format(eval_measures_cpu[i]), end='')
-        print('{:7.3f}'.format(eval_measures_cpu[8]))
-        return eval_measures_cpu
-
+        L1Measure = float(eval_measures_cpu[0] / eval_measures_cpu[1])
+        print('L1 Loss: %f, from %d eval samples' % (L1Measure, int(eval_measures_cpu[1])))
+        return L1Measure
     return None
-
 
 def main_worker(gpu, ngpus_per_node, args):
     args.gpu = gpu
@@ -345,9 +265,8 @@ def main_worker(gpu, ngpus_per_node, args):
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
 
     # Create model
-    model = BtsModel(args)
+    model = ShapeNet(args)
     model.train()
-    model.decoder.apply(weights_init_xavier)
     set_misc(model)
 
     num_params = sum([np.prod(p.size()) for p in model.parameters()])
@@ -355,6 +274,15 @@ def main_worker(gpu, ngpus_per_node, args):
 
     num_params_update = sum([np.prod(p.shape) for p in model.parameters() if p.requires_grad])
     print("Total number of learning parameters: {}".format(num_params_update))
+
+    kbcroph = 352
+    kbcropw = 1216
+
+    assert np.mod(args.batch_size, dist.get_world_size()) == 0
+    normoptizer = SurfaceNormalOptimizer(height=args.input_height, width=args.input_width, batch_size=int(args.batch_size / dist.get_world_size()), angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
+    normoptizer_eval = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=1, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
+    normoptizer.to(f'cuda:{args.gpu}')
+    normoptizer_eval.to(f'cuda:{args.gpu}')
 
     if args.distributed:
         if args.gpu is not None:
@@ -375,14 +303,12 @@ def main_worker(gpu, ngpus_per_node, args):
         print("Model Initialized")
 
     global_step = 0
-    best_eval_measures_lower_better = torch.zeros(6).cpu() + 1e3
-    best_eval_measures_higher_better = torch.zeros(3).cpu()
-    best_eval_steps = np.zeros(9, dtype=np.int32)
+    best_measure_l1 = 1e3
+    best_step = 0
 
     # Training parameters
     optimizer = torch.optim.AdamW([{'params': model.module.encoder.parameters(), 'weight_decay': args.weight_decay},
-                                   {'params': model.module.decoder.parameters(), 'weight_decay': 0}],
-                                  lr=args.learning_rate, eps=args.adam_eps)
+                                   {'params': model.module.decoder.parameters(), 'weight_decay': 0}], lr=args.learning_rate, eps=args.adam_eps)
 
     model_just_loaded = False
     if args.checkpoint_path != '':
@@ -397,9 +323,8 @@ def main_worker(gpu, ngpus_per_node, args):
             model.load_state_dict(checkpoint['model'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             try:
-                best_eval_measures_higher_better = checkpoint['best_eval_measures_higher_better'].cpu()
-                best_eval_measures_lower_better = checkpoint['best_eval_measures_lower_better'].cpu()
-                best_eval_steps = checkpoint['best_eval_steps']
+                best_measure_l1 = checkpoint['best_measure_l1']
+                best_step = checkpoint['best_step']
             except KeyError:
                 print("Could not load values for online evaluation")
 
@@ -413,25 +338,17 @@ def main_worker(gpu, ngpus_per_node, args):
 
     cudnn.benchmark = True
 
-    dataloader = BtsDataLoader(args, 'train')
-    dataloader_eval = BtsDataLoader(args, 'online_eval')
+    dataloader = KittiShapeDataLoader(args, 'train')
+    dataloader_eval = KittiShapeDataLoader(args, 'eval')
 
     # Logging
     if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
-        writer = SummaryWriter(args.log_directory + '/' + args.model_name + '/summaries', flush_secs=30)
-        if args.do_online_eval:
-            if args.eval_summary_directory != '':
-                eval_summary_path = os.path.join(args.eval_summary_directory, args.model_name)
-            else:
-                eval_summary_path = os.path.join(args.log_directory, 'eval')
-            eval_summary_writer = SummaryWriter(eval_summary_path, flush_secs=30)
-
-    silog_criterion = silog_loss(variance_focus=args.variance_focus)
+        writer = SummaryWriter(os.path.join(args.log_directory, args.model_name, 'summaries'), flush_secs=30)
+        eval_summary_writer = SummaryWriter(os.path.join(args.log_directory, args.model_name, 'summaries_eval'), flush_secs=30)
 
     start_time = time.time()
     duration = 0
 
-    num_log_images = 1
     end_learning_rate = args.end_learning_rate if args.end_learning_rate != -1 else 0.1 * args.learning_rate
 
     var_sum = [var.sum() for var in model.parameters() if var.requires_grad]
@@ -452,26 +369,18 @@ def main_worker(gpu, ngpus_per_node, args):
             optimizer.zero_grad()
             before_op_time = time.time()
 
-            image = torch.autograd.Variable(torch.cat([
-                sample_batched['image'].cuda(args.gpu, non_blocking=True),
-                sample_batched['shapeh'].cuda(args.gpu, non_blocking=True),
-                sample_batched['shapev'].cuda(args.gpu, non_blocking=True)], dim=1).contiguous())
-            focal = torch.autograd.Variable(sample_batched['focal'].cuda(args.gpu, non_blocking=True))
+            image = torch.autograd.Variable(sample_batched['image'].cuda(args.gpu, non_blocking=True))
+            K = torch.autograd.Variable(sample_batched['K'].cuda(gpu, non_blocking=True))
             depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
 
-            lpg8x8, lpg4x4, lpg2x2, reduc1x1, depth_est = model(image, focal)
+            reduc8x8_scaled, reduc4x4_scaled, reduc2x2_scaled, reduc1x1, pred_shape = model(image)
 
-            if args.dataset == 'nyu':
-                mask = depth_gt > 0.1
-            else:
-                mask = depth_gt > 1.0
-
-            loss = silog_criterion.forward(depth_est, depth_gt, mask.to(torch.bool))
+            loss, hloss, vloss, inbdh, inbdv = normoptizer.intergrationloss_ang(ang=pred_shape, intrinsic=K, depthMap=depth_gt)
             loss.backward()
             for param_group in optimizer.param_groups:
                 current_lr = (args.learning_rate - end_learning_rate) * (1 - global_step / num_total_steps) ** 0.9 + end_learning_rate
                 param_group['lr'] = current_lr
-
+            current_lr = 0
             optimizer.step()
 
             if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
@@ -481,7 +390,6 @@ def main_worker(gpu, ngpus_per_node, args):
                     return -1
 
             duration += time.time() - before_op_time
-
             if global_step and global_step % args.log_freq == 0 and not model_just_loaded:
                 var_sum = [var.sum() for var in model.parameters() if var.requires_grad]
                 var_cnt = len(var_sum)
@@ -495,34 +403,46 @@ def main_worker(gpu, ngpus_per_node, args):
                 print_string = 'GPU: {} | examples/s: {:4.2f} | loss: {:.5f} | var sum: {:.3f} avg: {:.3f} | time elapsed: {:.2f}h | time left: {:.2f}h'
                 print(print_string.format(args.gpu, examples_per_sec, loss, var_sum.item(), var_sum.item()/var_cnt, time_sofar, training_time_left))
 
-                if not args.multiprocessing_distributed or (args.multiprocessing_distributed
-                                                            and args.rank % ngpus_per_node == 0):
-                    writer.add_scalar('silog_loss', loss, global_step)
-                    writer.add_scalar('learning_rate', current_lr, global_step)
+                if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
+                    writer.add_scalar('loss/shapeloss', loss, global_step)
+                    writer.add_scalar('loss/hloss', hloss, global_step)
+                    writer.add_scalar('loss/vloss', vloss, global_step)
+                    writer.add_scalar('numcounts/inbdh', inbdh, global_step)
+                    writer.add_scalar('numcounts/inbdv', inbdv, global_step)
                     writer.add_scalar('var average', var_sum.item()/var_cnt, global_step)
-                    depth_gt = torch.where(depth_gt < 1e-3, depth_gt * 0 + 1e3, depth_gt)
-                    for i in range(num_log_images):
-                        fig1 = tensor2disp(depth_gt, vmax=30, viewind=i)
-                        fig2 = tensor2disp(depth_est, vmax=30, viewind=i)
-                        fig3 = tensor2disp(reduc1x1, percentile=90, viewind=i)
 
-                        fig4 = tensor2disp(lpg2x2, percentile=90, viewind=i)
-                        fig5 = tensor2disp(lpg4x4, percentile=90, viewind=i)
-                        fig6 = tensor2disp(lpg8x8, percentile=90, viewind=i)
+                    minang = - np.pi / 3 * 2
+                    maxang = 2 * np.pi - np.pi / 3 * 2
 
-                        figm = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3)], axis=0)
-                        figr = np.concatenate([np.array(fig4), np.array(fig5), np.array(fig6)], axis=0)
+                    viewind = 0
+                    depth_gtvls = torch.clone(depth_gt)
+                    depth_gtvls[depth_gtvls == 0] = float("Inf")
+                    fig_gt = tensor2disp(1 / depth_gtvls, vmax=0.15, viewind=viewind)
+                    fig_rgb = tensor2rgb(sample_batched['image'], viewind=viewind)
 
-                        minang = - np.pi / 3 * 2
-                        maxang = 2 * np.pi - np.pi / 3 * 2
-                        figrgb = tensor2rgb(sample_batched['image'], viewind=i)
-                        figshapeh = tensor2disp(((sample_batched['shapeh'] * 0.229 + 0.485) - 0.5) * 2 * np.pi - minang, viewind=i, vmax=maxang)
-                        figshapev = tensor2disp(((sample_batched['shapev'] * 0.229 + 0.485) - 0.5) * 2 * np.pi - minang, viewind=i, vmax=maxang)
-                        figl = np.concatenate([np.array(figrgb), np.array(figshapeh), np.array(figshapev)], axis=0)
+                    fig_angh = tensor2disp(pred_shape[:, 0].unsqueeze(1) - minang, vmax=maxang, viewind=viewind)
+                    fig_angv = tensor2disp(pred_shape[:, 1].unsqueeze(1) - minang, vmax=maxang, viewind=viewind)
 
-                        figcombined = np.concatenate([np.array(figl), np.array(figm), np.array(figr)], axis=1)
-                        writer.add_image('oview/image/{}'.format(i), (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), global_step)
+                    figoveiewu = np.concatenate([np.array(fig_rgb), np.array(fig_gt)], axis=1)
+                    figoveiewd = np.concatenate([np.array(fig_angh), np.array(fig_angv)], axis=1)
+                    figoveiew = np.concatenate([figoveiewu, figoveiewd], axis=0)
 
+                    actv_scales = [reduc8x8_scaled, reduc4x4_scaled, reduc2x2_scaled, reduc1x1]
+                    fig_actvsh = list()
+                    fig_actvsv = list()
+                    for actv in actv_scales:
+                        fig_actvsh.append(np.array(tensor2disp(actv[:, 0].unsqueeze(1), vmax=1, viewind=viewind)))
+                        fig_actvsv.append(np.array(tensor2disp(actv[:, 1].unsqueeze(1), vmax=1, viewind=viewind)))
+                    fig_actvsh = np.concatenate(fig_actvsh, axis=0)
+                    fig_actvsv = np.concatenate(fig_actvsv, axis=0)
+                    fig_actvs = np.concatenate([fig_actvsh, fig_actvsv], axis=1)
+
+                    fignorm = normoptizer.ang2normal(ang=pred_shape, intrinsic=K)
+                    fignorm = np.array(tensor2rgb((fignorm + 1) / 2, viewind=viewind, isnormed=False))
+
+                    writer.add_image('oview', (torch.from_numpy(figoveiew).float() / 255).permute([2, 0, 1]), global_step)
+                    writer.add_image('activations', (torch.from_numpy(fig_actvs).float() / 255).permute([2, 0, 1]), global_step)
+                    writer.add_image('normal', (torch.from_numpy(fignorm).float() / 255).permute([2, 0, 1]), global_step)
                     writer.flush()
 
             if not args.do_online_eval and global_step and global_step % args.save_freq == 0:
@@ -535,38 +455,33 @@ def main_worker(gpu, ngpus_per_node, args):
             if args.do_online_eval and global_step and global_step % args.eval_freq == 0 and not model_just_loaded:
                 time.sleep(0.1)
                 model.eval()
-                eval_measures = online_eval(model, dataloader_eval, gpu, ngpus_per_node)
-                if eval_measures is not None:
-                    for i in range(9):
-                        eval_summary_writer.add_scalar(eval_metrics[i], eval_measures[i].cpu(), int(global_step))
-                        measure = eval_measures[i]
+                eval_measure = online_eval(model, normoptizer_eval, dataloader_eval, gpu, ngpus_per_node)
+                if eval_measure is not None:
+                    if eval_measure < best_measure_l1:
+                        old_best_measure_l1 = best_measure_l1
+                        old_best_step = best_step
+                        best_measure_l1 = eval_measure
+                        best_step = global_step
+                        is_best = True
+                    else:
                         is_best = False
-                        if i < 6 and measure < best_eval_measures_lower_better[i]:
-                            old_best = best_eval_measures_lower_better[i].item()
-                            best_eval_measures_lower_better[i] = measure.item()
-                            is_best = True
-                        elif i >= 6 and measure > best_eval_measures_higher_better[i-6]:
-                            old_best = best_eval_measures_higher_better[i-6].item()
-                            best_eval_measures_higher_better[i-6] = measure.item()
-                            is_best = True
-                        if is_best:
-                            old_best_step = best_eval_steps[i]
-                            old_best_name = '/model-{}-best_{}_{:.5f}'.format(old_best_step, eval_metrics[i], old_best)
-                            model_path = args.log_directory + '/' + args.model_name + old_best_name
-                            if os.path.exists(model_path):
-                                command = 'rm {}'.format(model_path)
-                                os.system(command)
-                            best_eval_steps[i] = global_step
-                            model_save_name = '/model-{}-best_{}_{:.5f}'.format(global_step, eval_metrics[i], measure)
-                            print('New best for {}. Saving model: {}'.format(eval_metrics[i], model_save_name))
-                            checkpoint = {'global_step': global_step,
-                                          'model': model.state_dict(),
-                                          'optimizer': optimizer.state_dict(),
-                                          'best_eval_measures_higher_better': best_eval_measures_higher_better,
-                                          'best_eval_measures_lower_better': best_eval_measures_lower_better,
-                                          'best_eval_steps': best_eval_steps
-                                          }
-                            torch.save(checkpoint, args.log_directory + '/' + args.model_name + model_save_name)
+                    print("Best L1 Performance: %f, at step %d" % (best_measure_l1, best_step))
+                    eval_summary_writer.add_scalar('L1Measure', eval_measure, int(global_step))
+                    if is_best:
+                        old_best_name = 'model-{}-best_{}_{:.5f}'.format(old_best_step, 'L1Measure', old_best_measure_l1)
+                        model_path = os.path.join(args.log_directory, args.model_name, old_best_name)
+                        if os.path.exists(model_path):
+                            command = 'rm {}'.format(model_path)
+                            os.system(command)
+                        model_save_name = 'model-{}-best_{}_{:.5f}'.format(best_step, 'L1Measure', best_measure_l1)
+                        print('New best for {}. Saving model: {}'.format('L1Measure', model_save_name))
+                        checkpoint = {'global_step': global_step,
+                                      'model': model.state_dict(),
+                                      'optimizer': optimizer.state_dict(),
+                                      'best_measure_l1': best_measure_l1,
+                                      'best_step': best_step
+                                      }
+                        torch.save(checkpoint, os.path.join(args.log_directory, args.model_name, model_save_name))
                     eval_summary_writer.flush()
                 model.train()
                 block_print()
@@ -578,33 +493,10 @@ def main_worker(gpu, ngpus_per_node, args):
 
         epoch += 1
 
-
 def main():
     if args.mode != 'train':
         print('bts_main.py is only for training. Use bts_test.py instead.')
         return -1
-
-    model_filename = args.model_name + '.py'
-    command = 'mkdir ' + args.log_directory + '/' + args.model_name
-    os.system(command)
-
-    if args.checkpoint_path == '':
-        model_out_path = args.log_directory + '/' + args.model_name + '/' + model_filename
-        command = 'cp bts.py ' + model_out_path
-        os.system(command)
-        aux_out_path = args.log_directory + '/' + args.model_name + '/.'
-        command = 'cp bts_main.py ' + aux_out_path
-        os.system(command)
-        command = 'cp bts_dataloader.py ' + aux_out_path
-        os.system(command)
-    else:
-        loaded_model_dir = os.path.dirname(args.checkpoint_path)
-        loaded_model_name = os.path.basename(loaded_model_dir)
-        loaded_model_filename = loaded_model_name + '.py'
-
-        model_out_path = args.log_directory + '/' + args.model_name + '/' + model_filename
-        command = 'cp ' + loaded_model_dir + '/' + loaded_model_filename + ' ' + model_out_path
-        os.system(command)
 
     torch.cuda.empty_cache()
     args.distributed = args.world_size > 1 or args.multiprocessing_distributed
