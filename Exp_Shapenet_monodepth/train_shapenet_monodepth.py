@@ -28,9 +28,9 @@ import matplotlib
 import matplotlib.cm
 from tqdm import tqdm
 
-from Exp_Shapenet_resize.shapedataset import KittiShapeDataLoader, KittiShapeDataset
+from Exp_Shapenet_monodepth.shapedataset import KittiShapeDataLoader, KittiShapeDataset
 from util import *
-from Exp_Shapenet_resize.shapenet import ShapeNet
+from Exp_Shapenet_monodepth.shapenet import ShapeNet
 from torchvision import transforms
 import torch.utils.data.distributed
 import torch.distributed as dist
@@ -66,14 +66,12 @@ parser.add_argument('--save_freq',                 type=int,   help='Checkpoint 
 parser.add_argument('--fix_first_conv_blocks',                 help='if set, will fix the first two conv blocks', action='store_true')
 parser.add_argument('--fix_first_conv_block',                  help='if set, will fix the first conv block', action='store_true')
 parser.add_argument('--bn_no_track_stats',                     help='if set, will not track running stats in batch norm layers', action='store_true')
-parser.add_argument('--weight_decay',              type=float, help='weight decay factor for optimization', default=1e-2)
 parser.add_argument('--bts_size',                  type=int,   help='initial num_filters in bts', default=512)
 parser.add_argument('--retrain',                               help='if used with checkpoint_path, will restart training from step zero', action='store_true')
-parser.add_argument('--adam_eps',                  type=float, help='epsilon in Adam optimizer', default=1e-6)
 parser.add_argument('--batch_size',                type=int,   help='batch size', default=4)
 parser.add_argument('--num_epochs',                type=int,   help='number of epochs', default=50)
 parser.add_argument('--learning_rate',             type=float, help='initial learning rate', default=1e-4)
-parser.add_argument('--end_learning_rate',         type=float, default=-1)
+parser.add_argument("--scheduler_step_size",       type=int,   help="step size of the scheduler", default=15)
 parser.add_argument('--angw',                      type=float, default=0)
 parser.add_argument('--vlossw',                    type=float, default=0.2)
 parser.add_argument('--sclw',                      type=float, default=0)
@@ -122,11 +120,6 @@ elif args.mode == 'train' and args.checkpoint_path:
             continue
         vars()[key] = val
 
-inv_normalize = transforms.Normalize(
-    mean=[-0.485/0.229, -0.456/0.224, -0.406/0.225],
-    std=[1/0.229, 1/0.224, 1/0.225]
-)
-
 def compute_errors(gt, pred):
     thresh = np.maximum((gt / pred), (pred / gt))
     d1 = (thresh < 1.25).mean()
@@ -153,78 +146,8 @@ def compute_errors(gt, pred):
 def block_print():
     sys.stdout = open(os.devnull, 'w')
 
-
 def enable_print():
     sys.stdout = sys.__stdout__
-
-def get_num_lines(file_path):
-    f = open(file_path, 'r')
-    lines = f.readlines()
-    f.close()
-    return len(lines)
-
-def colorize(value, vmin=None, vmax=None, cmap='Greys'):
-    value = value.cpu().numpy()[:, :, :]
-    value = np.log10(value)
-
-    vmin = value.min() if vmin is None else vmin
-    vmax = value.max() if vmax is None else vmax
-
-    if vmin != vmax:
-        value = (value - vmin) / (vmax - vmin)
-    else:
-        value = value*0.
-
-    cmapper = matplotlib.cm.get_cmap(cmap)
-    value = cmapper(value, bytes=True)
-
-    img = value[:, :, :3]
-
-    return img.transpose((2, 0, 1))
-
-def normalize_result(value, vmin=None, vmax=None):
-    value = value.cpu().numpy()[0, :, :]
-
-    vmin = value.min() if vmin is None else vmin
-    vmax = value.max() if vmax is None else vmax
-
-    if vmin != vmax:
-        value = (value - vmin) / (vmax - vmin)
-    else:
-        value = value * 0.
-
-    return np.expand_dims(value, 0)
-
-def set_misc(model):
-    if args.bn_no_track_stats:
-        print("Disabling tracking running stats in batch norm layers")
-        model.apply(bn_init_as_tf)
-
-    if args.fix_first_conv_blocks:
-        if 'resne' in args.encoder:
-            fixing_layers = ['base_model.conv1', 'base_model.layer1.0', 'base_model.layer1.1', '.bn']
-        else:
-            fixing_layers = ['conv0', 'denseblock1.denselayer1', 'denseblock1.denselayer2', 'norm']
-        print("Fixing first two conv blocks")
-    elif args.fix_first_conv_block:
-        if 'resne' in args.encoder:
-            fixing_layers = ['base_model.conv1', 'base_model.layer1.0', '.bn']
-        else:
-            fixing_layers = ['conv0', 'denseblock1.denselayer1', 'norm']
-        print("Fixing first conv block")
-    else:
-        if 'resne' in args.encoder:
-            fixing_layers = ['base_model.conv1', '.bn']
-        else:
-            fixing_layers = ['conv0', 'norm']
-        print("Fixing first conv layer")
-
-    for name, child in model.named_children():
-        if not 'encoder' in name:
-            continue
-        for name2, parameters in child.named_parameters():
-            if any(x in name2 for x in fixing_layers):
-                parameters.requires_grad = False
 
 def online_eval(model, normoptizer_eval, dataloader_eval, gpu, ngpus):
     eval_measures = torch.zeros(2).cuda(device=gpu)
@@ -237,7 +160,7 @@ def online_eval(model, normoptizer_eval, dataloader_eval, gpu, ngpus):
             if 'depth' not in eval_sample_batched:
                 continue
 
-            _, _, _, _, pred_shape = model(image)
+            pred_shape = model(image)
             pred_shape = F.interpolate(pred_shape, [kbcroph, kbcropw], mode='bilinear', align_corners=True)
             loss = normoptizer_eval.intergrationloss_ang_validation(ang=pred_shape, intrinsic=K, depthMap=depth_gt)
 
@@ -269,9 +192,8 @@ def main_worker(gpu, ngpus_per_node, args):
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
 
     # Create model
-    model = ShapeNet(args)
+    model = ShapeNet()
     model.train()
-    set_misc(model)
 
     num_params = sum([np.prod(p.size()) for p in model.parameters()])
     print("Total number of parameters: {}".format(num_params))
@@ -308,9 +230,8 @@ def main_worker(gpu, ngpus_per_node, args):
     best_step = 0
 
     # Training parameters
-    optimizer = torch.optim.AdamW([{'params': model.module.encoder.parameters(), 'weight_decay': args.weight_decay},
-                                   {'params': model.module.decoder.parameters(), 'weight_decay': 0}], lr=args.learning_rate, eps=args.adam_eps)
-
+    optimizer = torch.optim.Adam(list(model.module.encoder.parameters()) + list(model.module.decoder.parameters()), lr=args.learning_rate)
+    model_lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.scheduler_step_size, 0.1)
     model_just_loaded = False
     if args.checkpoint_path != '':
         if os.path.isfile(args.checkpoint_path):
@@ -350,8 +271,6 @@ def main_worker(gpu, ngpus_per_node, args):
     start_time = time.time()
     duration = 0
 
-    end_learning_rate = args.end_learning_rate if args.end_learning_rate != -1 else 0.1 * args.learning_rate
-
     var_sum = [var.sum() for var in model.parameters() if var.requires_grad]
     var_cnt = len(var_sum)
     var_sum = np.sum(var_sum)
@@ -374,18 +293,15 @@ def main_worker(gpu, ngpus_per_node, args):
             K = torch.autograd.Variable(sample_batched['K'].cuda(gpu, non_blocking=True))
             depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
 
-            reduc8x8_scaled, reduc4x4_scaled, reduc2x2_scaled, reduc1x1, pred_shape = model(image)
+            pred_shape = model(image)
             pred_shape = F.interpolate(pred_shape, [kbcroph, kbcropw], mode='bilinear', align_corners=True)
 
             loss, hloss, vloss, inbdh, inbdv = normoptizer.intergrationloss_ang(ang=pred_shape, intrinsic=K, depthMap=depth_gt)
             loss.backward()
-            for param_group in optimizer.param_groups:
-                current_lr = (args.learning_rate - end_learning_rate) * (1 - global_step / num_total_steps) ** 0.9 + end_learning_rate
-                param_group['lr'] = current_lr
             optimizer.step()
 
             if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
-                print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], lr: {:.12f}, loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, current_lr, loss))
+                print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, loss))
                 if np.isnan(loss.cpu().item()):
                     print('NaN in loss occurred. Aborting training.')
                     return -1
@@ -428,21 +344,10 @@ def main_worker(gpu, ngpus_per_node, args):
                     figoveiewd = np.concatenate([np.array(fig_angh), np.array(fig_angv)], axis=1)
                     figoveiew = np.concatenate([figoveiewu, figoveiewd], axis=0)
 
-                    actv_scales = [reduc8x8_scaled, reduc4x4_scaled, reduc2x2_scaled, reduc1x1]
-                    fig_actvsh = list()
-                    fig_actvsv = list()
-                    for actv in actv_scales:
-                        fig_actvsh.append(np.array(tensor2disp(actv[:, 0].unsqueeze(1), vmax=1, viewind=viewind)))
-                        fig_actvsv.append(np.array(tensor2disp(actv[:, 1].unsqueeze(1), vmax=1, viewind=viewind)))
-                    fig_actvsh = np.concatenate(fig_actvsh, axis=0)
-                    fig_actvsv = np.concatenate(fig_actvsv, axis=0)
-                    fig_actvs = np.concatenate([fig_actvsh, fig_actvsv], axis=1)
-
                     fignorm = normoptizer.ang2normal(ang=pred_shape, intrinsic=K)
                     fignorm = np.array(tensor2rgb((fignorm + 1) / 2, viewind=viewind, isnormed=False))
 
                     writer.add_image('oview', (torch.from_numpy(figoveiew).float() / 255).permute([2, 0, 1]), global_step)
-                    writer.add_image('activations', (torch.from_numpy(fig_actvs).float() / 255).permute([2, 0, 1]), global_step)
                     writer.add_image('normal', (torch.from_numpy(fignorm).float() / 255).permute([2, 0, 1]), global_step)
                     writer.flush()
 
@@ -486,13 +391,13 @@ def main_worker(gpu, ngpus_per_node, args):
                     eval_summary_writer.flush()
                 model.train()
                 block_print()
-                set_misc(model)
                 enable_print()
 
             model_just_loaded = False
             global_step += 1
 
         epoch += 1
+        model_lr_scheduler.step()
 
 def main():
     if args.mode != 'train':
