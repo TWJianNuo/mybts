@@ -127,22 +127,6 @@ class KittiShapeDataset(Dataset):
                 filteredfilenames.append(entry)
         self.filenames = filteredfilenames
 
-    def do_kb_crop(self, inputs, K):
-        kbcroph = 352
-        kbcropw = 1216
-
-        width, height = inputs['image'].size
-        top_margin = int(height - kbcroph)
-        left_margin = int((width - kbcropw) / 2)
-
-        for k in inputs.keys():
-            sz = inputs[k].size
-            assert sz[0] == width and sz[1] == height, print("Image Shape Dismatch")
-            inputs[k] = inputs[k].crop((left_margin, top_margin, left_margin + kbcropw, top_margin + kbcroph))
-
-        K[0, 2] = K[0, 2] - left_margin
-        K[1, 2] = K[1, 2] - top_margin
-
     def __getitem__(self, idx):
         inputs = dict()
 
@@ -198,24 +182,6 @@ class KittiShapeDataset(Dataset):
         inputs = self.toTensor(inputs)
 
         return inputs
-
-    def do_kb_crop(self, inputs, K):
-        kbcroph = 352
-        kbcropw = 1216
-
-        width, height = inputs['image'].size
-        top_margin = int(height - kbcroph)
-        left_margin = int((width - kbcropw) / 2)
-
-        for k in inputs.keys():
-            sz = inputs[k].size
-            assert sz[0] == width and sz[1] == height, print("Image Shape Dismatch")
-            inputs[k] = inputs[k].crop((left_margin, top_margin, left_margin + kbcropw, top_margin + kbcroph))
-
-        K[0, 2] = K[0, 2] - left_margin
-        K[1, 2] = K[1, 2] - top_margin
-
-        return inputs, K
 
     def get_depth(self, depth_path):
         depth_gt = Image.open(depth_path)
