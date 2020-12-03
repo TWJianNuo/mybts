@@ -28,9 +28,9 @@ import matplotlib
 import matplotlib.cm
 from tqdm import tqdm
 
-from Exp_Shapenet_baseline.shapedataset import KittiShapeDataLoader, KittiShapeDataset
+from Exp_Shapenet_resize.shapedataset import KittiShapeDataLoader, KittiShapeDataset
 from util import *
-from Exp_Shapenet_baseline.shapenet import ShapeNet
+from Exp_Shapenet_resize.shapenet import ShapeNet
 from torchvision import transforms
 import torch.utils.data.distributed
 import torch.distributed as dist
@@ -279,7 +279,7 @@ def main_worker(gpu, ngpus_per_node, args):
     kbcropw = 1216
 
     assert np.mod(args.batch_size, dist.get_world_size()) == 0
-    normoptizer = SurfaceNormalOptimizer(height=args.input_height, width=args.input_width, batch_size=int(args.batch_size / dist.get_world_size()), angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
+    normoptizer = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=int(args.batch_size / dist.get_world_size()), angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
     normoptizer_eval = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=1, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
     normoptizer.to(f'cuda:{args.gpu}')
     normoptizer_eval.to(f'cuda:{args.gpu}')
@@ -374,6 +374,7 @@ def main_worker(gpu, ngpus_per_node, args):
             depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
 
             reduc8x8_scaled, reduc4x4_scaled, reduc2x2_scaled, reduc1x1, pred_shape = model(image)
+            pred_shape = F.interpolate(pred_shape, [kbcroph, kbcropw], mode='bilinear', align_corners=True)
 
             loss, hloss, vloss, inbdh, inbdv = normoptizer.intergrationloss_ang(ang=pred_shape, intrinsic=K, depthMap=depth_gt)
             loss.backward()
@@ -417,7 +418,7 @@ def main_worker(gpu, ngpus_per_node, args):
                     depth_gtvls = torch.clone(depth_gt)
                     depth_gtvls[depth_gtvls == 0] = float("Inf")
                     fig_gt = tensor2disp(1 / depth_gtvls, vmax=0.15, viewind=viewind)
-                    fig_rgb = tensor2rgb(sample_batched['image'], viewind=viewind)
+                    fig_rgb = tensor2rgb(sample_batched['image'], viewind=viewind).resize([kbcropw, kbcroph])
 
                     fig_angh = tensor2disp(pred_shape[:, 0].unsqueeze(1) - minang, vmax=maxang, viewind=viewind)
                     fig_angv = tensor2disp(pred_shape[:, 1].unsqueeze(1) - minang, vmax=maxang, viewind=viewind)
