@@ -26,7 +26,6 @@ import transforms as T
 from transforms.augmentation import _transform_to_aug
 
 from fvcore.transforms.transform import CropTransform
-
 from distributed_sampler_no_evenly_divisible import *
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -109,10 +108,16 @@ class KittiShapeDataset(Dataset):
 
         self.filter_file()
 
+        kbcroph = 352
+        kbcropw = 1216
         if self.mode == 'train':
-            self.valuegaugs = T.AugmentationList([
-                T.RandomCrop(crop_type='absolute', crop_size=[self.args.input_height, self.args.input_width]),
+            self.cropflipAug = T.AugmentationList([
+                T.RandomCrop(crop_type='absolute', crop_size=[kbcroph, kbcropw]),
                 T.RandomFlip(prob=0.5, horizontal=True)])
+
+        self.resizeAug = T.AugmentationList([
+            T.Resize([self.args.input_height, self.args.input_width])])
+
         self.toTensor = ToTensor()
 
     def filter_file(self):
@@ -139,9 +144,13 @@ class KittiShapeDataset(Dataset):
         if self.mode == 'train':
             # Do Crop and Flip Augmentations
             aug_input = T.AugInput(image, intrinsic=K)
-            transforms = self.valuegaugs(aug_input)
+            transforms = self.cropflipAug(aug_input)
             image, K = aug_input.image, aug_input.intrinsic
             depthgt = transforms.apply_image(depthgt)
+
+            aug_input = T.AugInput(image)
+            self.resizeAug(aug_input)
+            image = aug_input.image
             image = self.augment_image(image)
 
             # self.test_augmentations(sample_path, image, depthgt, K, transforms)
@@ -161,6 +170,10 @@ class KittiShapeDataset(Dataset):
             transforms = kbcrop_aug(aug_input)
             image, K = aug_input.image, aug_input.intrinsic
             depthgt = transforms.apply_image(depthgt)
+
+            aug_input = T.AugInput(image)
+            self.resizeAug(aug_input)
+            image = aug_input.image
 
         inputs['image'] = image
         inputs['depth'] = depthgt
