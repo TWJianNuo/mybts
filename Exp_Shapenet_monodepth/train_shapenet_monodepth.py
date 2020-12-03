@@ -401,7 +401,8 @@ def main_worker(gpu, ngpus_per_node, args):
                                       'best_step': best_step
                                       }
                         torch.save(checkpoint, os.path.join(args.log_directory, args.model_name, model_save_name))
-                    eval_summary_writer.flush()
+                    if version_num > 1100000000:
+                        eval_summary_writer.flush()
                 model.train()
                 block_print()
                 enable_print()
