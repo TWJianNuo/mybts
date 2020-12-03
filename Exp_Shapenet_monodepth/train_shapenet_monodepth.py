@@ -208,11 +208,16 @@ def main_worker(gpu, ngpus_per_node, args):
     num_params_update = sum([np.prod(p.shape) for p in model.parameters() if p.requires_grad])
     print("Total number of learning parameters: {}".format(num_params_update))
 
-    assert np.mod(args.batch_size, dist.get_world_size()) == 0
-    normoptizer = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=int(args.batch_size / dist.get_world_size()), angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
-    normoptizer_eval = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=1, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
-    normoptizer.to(f'cuda:{args.gpu}')
-    normoptizer_eval.to(f'cuda:{args.gpu}')
+    if args.distributed:
+        normoptizer = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=int(args.batch_size / dist.get_world_size()), angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
+        normoptizer_eval = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=1, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
+        normoptizer.to(f'cuda:{args.gpu}')
+        normoptizer_eval.to(f'cuda:{args.gpu}')
+    else:
+        normoptizer = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=int(args.batch_size), angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
+        normoptizer_eval = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=1, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
+        normoptizer = normoptizer.cuda()
+        normoptizer_eval = normoptizer_eval.cuda()
 
     if args.distributed:
         if args.gpu is not None:
