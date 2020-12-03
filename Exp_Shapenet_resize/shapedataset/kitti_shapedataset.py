@@ -114,8 +114,8 @@ class KittiShapeDataset(Dataset):
             self.cropflipAug = T.AugmentationList([
                 T.RandomCrop(crop_type='absolute', crop_size=[kbcroph, kbcropw]),
                 T.RandomFlip(prob=0.5, horizontal=True)])
-            self.resizeAug = T.AugmentationList([
-                T.Resize([self.args.input_height, self.args.input_width])])
+        self.resizeAug = T.AugmentationList([
+            T.Resize([self.args.input_height, self.args.input_width])])
 
         self.toTensor = ToTensor()
 
