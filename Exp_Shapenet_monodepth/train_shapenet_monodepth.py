@@ -361,7 +361,8 @@ def main_worker(gpu, ngpus_per_node, args):
 
                     writer.add_image('oview', (torch.from_numpy(figoveiew).float() / 255).permute([2, 0, 1]), global_step)
                     writer.add_image('normal', (torch.from_numpy(fignorm).float() / 255).permute([2, 0, 1]), global_step)
-                    writer.flush()
+                    if version_num > 1100000000:
+                        writer.flush()
 
             if not args.do_online_eval and global_step and global_step % args.save_freq == 0:
                 if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
