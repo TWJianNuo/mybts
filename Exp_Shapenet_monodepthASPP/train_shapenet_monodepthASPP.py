@@ -371,11 +371,12 @@ def main_worker(gpu, ngpus_per_node, args):
                                   'optimizer': optimizer.state_dict()}
                     torch.save(checkpoint, args.log_directory + '/' + args.model_name + '/model-{}'.format(global_step))
 
-            if args.do_online_eval and global_step and global_step % args.eval_freq == 0 and not model_just_loaded and epoch>=2:
+            if args.do_online_eval and global_step and global_step % args.eval_freq == 0 and not model_just_loaded:
                 time.sleep(0.1)
                 model.eval()
                 eval_measure = online_eval(model, normoptizer_eval, dataloader_eval, gpu, ngpus_per_node)
-                if eval_measure is not None:
+                eval_summary_writer.add_scalar('L1Measure', eval_measure, int(global_step))
+                if epoch>=2:
                     if eval_measure < best_measure_l1:
                         old_best_measure_l1 = best_measure_l1
                         old_best_step = best_step
@@ -385,7 +386,6 @@ def main_worker(gpu, ngpus_per_node, args):
                     else:
                         is_best = False
                     print("Best L1 Performance: %f, at step %d" % (best_measure_l1, best_step))
-                    eval_summary_writer.add_scalar('L1Measure', eval_measure, int(global_step))
                     if is_best:
                         old_best_name = 'model-{}-best_{}_{:.5f}'.format(old_best_step, 'L1Measure', old_best_measure_l1)
                         model_path = os.path.join(args.log_directory, args.model_name, old_best_name)
