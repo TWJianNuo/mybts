@@ -22,13 +22,13 @@ from PIL import Image, ImageFile
 import os
 import random
 
-from Exp_Shapenet_baseline.shapedataset import transforms as T
+import transforms as T
+from transforms.augmentation import _transform_to_aug
 
 from fvcore.transforms.transform import CropTransform
 
 from distributed_sampler_no_evenly_divisible import *
 
-from Exp_Shapenet_baseline.shapedataset.transforms.augmentation import _transform_to_aug
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 def _is_pil_image(img):
