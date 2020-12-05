@@ -278,7 +278,7 @@ def main_worker(gpu, ngpus_per_node, args):
     # Logging
     if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
         writer = SummaryWriter(os.path.join(args.log_directory, args.model_name, 'summaries'), flush_secs=30)
-        eval_summary_writer = SummaryWriter(os.path.join(args.log_directory, args.model_name, 'summaries_eval'), flush_secs=30)
+        eval_summary_writer = SummaryWriter(os.path.join(args.log_directory, 'eval', args.model_name), flush_secs=30)
 
     start_time = time.time()
     duration = 0
@@ -376,7 +376,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 model.eval()
                 eval_measure = online_eval(model, normoptizer_eval, dataloader_eval, gpu, ngpus_per_node)
                 eval_summary_writer.add_scalar('L1Measure', eval_measure, int(global_step))
-                if epoch>=2:
+                if epoch >= 10:
                     if eval_measure < best_measure_l1:
                         old_best_measure_l1 = best_measure_l1
                         old_best_step = best_step

@@ -61,6 +61,8 @@ parser.add_argument('--dataset', type=str, help='dataset to train on, make3d or 
 parser.add_argument('--do_kb_crop', help='if set, crop input images as kitti benchmark images', action='store_true')
 parser.add_argument('--save_lpg', help='if set, save outputs from lpg layers', action='store_true')
 parser.add_argument('--bts_size', type=int,   help='initial num_filters in bts', default=512)
+parser.add_argument('--usesyncnorm', help='if set, save outputs from lpg layers', action='store_true')
+
 
 if sys.argv.__len__() == 2:
     arg_filename_with_prefix = '@' + sys.argv[1]
@@ -105,7 +107,7 @@ def test(params):
 
     print('now testing {} files with {}'.format(num_test_samples, args.checkpoint_path))
 
-    save_name = 'result_' + args.model_name
+    save_name = os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Bts_Pred', 'result_' + args.model_name)
 
     os.makedirs(os.path.join(save_name, 'vls'), exist_ok=True)
     os.makedirs(os.path.join(save_name, 'pred'), exist_ok=True)

@@ -142,7 +142,7 @@ class bts(nn.Module):
         super(bts, self).__init__()
         self.params = params
 
-        if dist.get_world_size() == 1 or (not params.usesyncnorm):
+        if not params.usesyncnorm:
             BNlayer = nn.BatchNorm2d
             print("Init Batch Norm layer as nn.BatchNorm2d")
         else:

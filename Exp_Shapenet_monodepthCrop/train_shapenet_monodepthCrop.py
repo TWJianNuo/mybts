@@ -114,18 +114,6 @@ if sys.argv.__len__() == 2:
 else:
     args = parser.parse_args()
 
-if args.mode == 'train' and not args.checkpoint_path:
-    from bts import *
-
-elif args.mode == 'train' and args.checkpoint_path:
-    model_dir = os.path.dirname(args.checkpoint_path)
-    model_name = os.path.basename(model_dir)
-    import sys
-    sys.path.append(model_dir)
-    for key, val in vars(__import__(model_name)).items():
-        if key.startswith('__') and key.endswith('__'):
-            continue
-        vars()[key] = val
 
 def compute_errors(gt, pred):
     thresh = np.maximum((gt / pred), (pred / gt))
@@ -168,7 +156,7 @@ def online_eval(model, normoptizer_eval, dataloader_eval, gpu, ngpus):
                 continue
 
             pred_shape = model(image)
-            loss, hloss, vloss, inbdh, inbdv = normoptizer_eval.intergrationloss_ang(ang=pred_shape, intrinsic=K, depthMap=depth_gt)
+            loss = normoptizer_eval.intergrationloss_ang_validation(ang=pred_shape, intrinsic=K, depthMap=depth_gt)
 
         eval_measures[0] += loss
         eval_measures[1] += 1
@@ -277,7 +265,7 @@ def main_worker(gpu, ngpus_per_node, args):
     # Logging
     if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
         writer = SummaryWriter(os.path.join(args.log_directory, args.model_name, 'summaries'), flush_secs=30)
-        eval_summary_writer = SummaryWriter(os.path.join(args.log_directory, args.model_name, 'summaries_eval'), flush_secs=30)
+        eval_summary_writer = SummaryWriter(os.path.join(args.log_directory, 'eval', args.model_name), flush_secs=30)
 
     start_time = time.time()
     duration = 0
@@ -373,7 +361,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 model.eval()
                 eval_measure = online_eval(model, normoptizer_eval, dataloader_eval, gpu, ngpus_per_node)
                 eval_summary_writer.add_scalar('L1Measure', eval_measure, int(global_step))
-                if epoch >= 2:
+                if epoch >= 10:
                     if eval_measure < best_measure_l1:
                         old_best_measure_l1 = best_measure_l1
                         old_best_step = best_step
