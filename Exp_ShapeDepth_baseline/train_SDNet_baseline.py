@@ -84,7 +84,7 @@ parser.add_argument('--vlossw',                    type=float, default=0.2)
 parser.add_argument('--sclw',                      type=float, default=0)
 parser.add_argument('--min_depth',                 type=float, help="min depth value", default=0.1)
 parser.add_argument('--max_depth',                 type=float, help="max depth value", default=100)
-parser.add_argument('--shapelossw',                type=float, help="weight of loss on shape", default=1)
+parser.add_argument('--depthlossw',                type=float, help="weight of loss on depth", default=1)
 
 
 # Preprocessing
@@ -342,7 +342,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
             shapeloss = compute_shape_loss(normoptizer=normoptizer, outputs=outputs, intrinsic=K, depth_gt=depth_gt)
             depthloss = compute_depth_loss(outputs=outputs, depth_gt=depth_gt)
-            loss = depthloss + args.shapelossw * shapeloss
+            loss = args.depthlossw * depthloss + shapeloss
 
             loss.backward()
             optimizer.step()
