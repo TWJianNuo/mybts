@@ -417,7 +417,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 eval_summary_writer_Depth.add_scalar('Depth_a1', eval_measures_depth[6], int(global_step))
 
                 if epoch >= 10:
-                    for kk in best_measures.shape[0]:
+                    for kk in range(best_measures.shape[0]):
                         is_best = False
                         if kk == 0 and eval_measures_shape[0] < best_measures[kk]:
                             old_best_measure = best_measures[kk]
@@ -454,7 +454,8 @@ def main_worker(gpu, ngpus_per_node, args):
                                           }
                             torch.save(checkpoint, os.path.join(args.log_directory, args.model_name, model_save_name))
                         if version_num > 1100000000:
-                            eval_summary_writer.flush()
+                            eval_measures_shape.flush()
+                            eval_measures_depth.flush()
                 print("Best Shape L1: %f, at step %d" % (best_measures[0], best_steps[0]))
                 print("Best Depth abserl: %f, at step %d" % (best_measures[1], best_steps[1]))
                 print("Best Depth a1: %f, at step %d" % (best_measures[2], best_steps[2]))

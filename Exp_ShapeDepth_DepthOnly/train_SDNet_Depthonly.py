@@ -369,7 +369,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 print("Best Depth a1: %f, at step %d" % (best_measures[1], best_steps[1]))
 
                 if epoch >= 10:
-                    for kk in best_measures.shape[0]:
+                    for kk in range(best_measures.shape[0]):
                         is_best = False
                         if kk == 0 and eval_measures_depth[1] < best_measures[0]:
                             old_best_measure = best_measures[kk]
