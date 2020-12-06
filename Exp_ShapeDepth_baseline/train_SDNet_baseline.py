@@ -271,6 +271,9 @@ def main_worker(gpu, ngpus_per_node, args):
     global_step = 0
     best_measures = np.zeros([3])
     best_steps = np.zeros([3])
+    best_measures[0] = 1e3
+    best_measures[1] = 1e3
+    best_measures[2] = 0
 
     measurements = ['ShapeL1', 'DepthAbsrel', 'DepthA1']
 
@@ -325,10 +328,6 @@ def main_worker(gpu, ngpus_per_node, args):
     steps_per_epoch = len(dataloader.data)
     num_total_steps = args.num_epochs * steps_per_epoch
     epoch = global_step // steps_per_epoch
-
-    model.eval()
-    eval_measures_shape, eval_measures_depth = online_eval(model, normoptizer_eval, dataloader_eval, gpu,
-                                                           ngpus_per_node)
 
     while epoch < args.num_epochs:
         if args.distributed:
@@ -423,22 +422,22 @@ def main_worker(gpu, ngpus_per_node, args):
                 if epoch >= 10:
                     for kk in best_measures.shape[0]:
                         is_best = False
-                        if kk == 0 and eval_measures_shape[0] < best_measures[0]:
+                        if kk == 0 and eval_measures_shape[0] < best_measures[kk]:
                             old_best_measure = best_measures[kk]
                             old_best_step = best_steps[kk]
                             best_measures[kk] = eval_measures_shape[0]
                             best_steps[kk] = global_step
                             is_best = True
-                        elif kk == 1 and eval_measures_shape[1] < best_measures[1]:
+                        elif kk == 1 and eval_measures_depth[1] < best_measures[kk]:
                             old_best_measure = best_measures[kk]
                             old_best_step = best_steps[kk]
-                            best_measures[kk] = eval_measures_shape[0]
+                            best_measures[kk] = eval_measures_depth[1]
                             best_steps[kk] = global_step
                             is_best = True
-                        elif kk == 2 and eval_measures_shape[2] > best_measures[0]:
+                        elif kk == 2 and eval_measures_depth[6] > best_measures[kk]:
                             old_best_measure = best_measures[kk]
                             old_best_step = best_steps[kk]
-                            best_measures[kk] = eval_measures_shape[0]
+                            best_measures[kk] = eval_measures_depth[6]
                             best_steps[kk] = global_step
                             is_best = True
 
