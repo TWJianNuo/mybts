@@ -383,7 +383,7 @@ def main_worker(gpu, ngpus_per_node, args):
                     fig_angv = tensor2disp(pred_shape[:, 1].unsqueeze(1) - minang, vmax=maxang, viewind=viewind)
 
                     pred_depth = outputs[('depth', 0)]
-                    fig_depth = tensor2disp_circ(pred_depth, vmax=0.07, viewind=viewind)
+                    fig_depth = tensor2disp_circ(1/pred_depth, vmax=0.07, viewind=viewind)
 
                     fignorm = normoptizer.ang2normal(ang=pred_shape, intrinsic=K)
                     fignorm = np.array(tensor2rgb((fignorm + 1) / 2, viewind=viewind, isnormed=False))
