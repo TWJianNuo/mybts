@@ -31,6 +31,22 @@ def tensor2disp(tensor, vmax=0.18, percentile=None, viewind=0):
     tnp = (cm(tnp) * 255).astype(np.uint8)
     return pil.fromarray(tnp[:, :, 0:3])
 
+def tensor2disp_circ(tensor, vmax=0.18, percentile=None, viewind=0):
+    cm = plt.get_cmap('hsv')
+    tnp = tensor[viewind, 0, :, :].detach().cpu().numpy()
+    selector = tnp == 0
+    selector = np.stack([selector, selector, selector], axis=2)
+
+    if percentile is not None:
+        vmax = np.percentile(tnp, percentile)
+    tnp = tnp / vmax
+    tnp = np.mod(tnp, 1)
+    tnp = (cm(tnp) * 255).astype(np.uint8)
+    tnp = tnp[:, :, 0:3]
+
+    tnp[selector] = 0
+    return pil.fromarray(tnp)
+
 class SurfaceNormalOptimizer(nn.Module):
     def __init__(self, height, width, batch_size, angw=1e-6, vlossw=0.2, sclw=0):
         super(SurfaceNormalOptimizer, self).__init__()
