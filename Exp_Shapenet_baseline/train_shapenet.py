@@ -77,6 +77,7 @@ parser.add_argument('--end_learning_rate',         type=float, default=-1)
 parser.add_argument('--angw',                      type=float, default=0)
 parser.add_argument('--vlossw',                    type=float, default=0.2)
 parser.add_argument('--sclw',                      type=float, default=0)
+parser.add_argument("--scheduler_step_size",       type=int,   help="step size of the scheduler", default=15)
 
 # Preprocessing
 parser.add_argument('--do_kb_crop',                            help='if set, crop input images as kitti benchmark images', action='store_true')
@@ -267,7 +268,6 @@ def main_worker(gpu, ngpus_per_node, args):
     # Create model
     model = ShapeNet(args)
     model.train()
-    set_misc(model)
 
     num_params = sum([np.prod(p.size()) for p in model.parameters()])
     print("Total number of parameters: {}".format(num_params))
@@ -307,8 +307,8 @@ def main_worker(gpu, ngpus_per_node, args):
     best_step = 0
 
     # Training parameters
-    optimizer = torch.optim.AdamW([{'params': model.module.encoder.parameters(), 'weight_decay': args.weight_decay},
-                                   {'params': model.module.decoder.parameters(), 'weight_decay': 0}], lr=args.learning_rate, eps=args.adam_eps)
+    optimizer = torch.optim.Adam(list(model.module.encoder.parameters()) + list(model.module.decoder.parameters()), lr=args.learning_rate)
+    model_lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.scheduler_step_size, 0.1)
 
     model_just_loaded = False
     if args.checkpoint_path != '':
@@ -491,6 +491,7 @@ def main_worker(gpu, ngpus_per_node, args):
             global_step += 1
 
         epoch += 1
+        model_lr_scheduler.step()
 
 def main():
     if args.mode != 'train':
