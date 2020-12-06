@@ -412,7 +412,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 time.sleep(0.1)
                 model.eval()
                 eval_measures_shape, eval_measures_depth = online_eval(model, normoptizer_eval, dataloader_eval, gpu, ngpus_per_node)
-                eval_summary_writer_Shape.add_scalar('Shape_L1Measure', eval_measures_shape[0], int(global_step))
+                eval_summary_writer_Shape.add_scalar('L1Measure', eval_measures_shape[0], int(global_step))
                 eval_summary_writer_Depth.add_scalar('Depth_absrel', eval_measures_depth[1], int(global_step))
                 eval_summary_writer_Depth.add_scalar('Depth_a1', eval_measures_depth[6], int(global_step))
 
