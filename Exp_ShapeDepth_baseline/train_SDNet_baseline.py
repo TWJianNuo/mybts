@@ -80,8 +80,8 @@ parser.add_argument('--num_epochs',                type=int,   help='number of e
 parser.add_argument('--learning_rate',             type=float, help='initial learning rate', default=1e-4)
 parser.add_argument("--scheduler_step_size",       type=int,   help="step size of the scheduler", default=15)
 parser.add_argument('--angw',                      type=float, default=0)
-parser.add_argument('--vlossw',                    type=float, default=0.2)
-parser.add_argument('--sclw',                      type=float, default=0)
+parser.add_argument('--vlossw',                    type=float, default=1)
+parser.add_argument('--sclw',                      type=float, default=1e-3)
 parser.add_argument('--min_depth',                 type=float, help="min depth value", default=0.1)
 parser.add_argument('--max_depth',                 type=float, help="max depth value", default=100)
 parser.add_argument('--depthlossw',                type=float, help="weight of loss on depth", default=1)
@@ -314,7 +314,8 @@ def main_worker(gpu, ngpus_per_node, args):
     # Logging
     if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
         writer = SummaryWriter(os.path.join(args.log_directory, args.model_name, 'summaries'), flush_secs=30)
-        eval_summary_writer = SummaryWriter(os.path.join(args.log_directory, 'eval_SD', args.model_name), flush_secs=30)
+        eval_summary_writer_Depth = SummaryWriter(os.path.join(args.log_directory, 'eval_Depth', args.model_name), flush_secs=30)
+        eval_summary_writer_Shape = SummaryWriter(os.path.join(args.log_directory, 'eval', args.model_name), flush_secs=30)
 
     start_time = time.time()
     duration = 0
@@ -411,13 +412,9 @@ def main_worker(gpu, ngpus_per_node, args):
                 time.sleep(0.1)
                 model.eval()
                 eval_measures_shape, eval_measures_depth = online_eval(model, normoptizer_eval, dataloader_eval, gpu, ngpus_per_node)
-                eval_summary_writer.add_scalar('Shape_L1Measure', eval_measures_shape[0], int(global_step))
-                eval_summary_writer.add_scalar('Depth_absrel', eval_measures_depth[1], int(global_step))
-                eval_summary_writer.add_scalar('Depth_a1', eval_measures_depth[6], int(global_step))
-
-                print("Best Shape L1: %f, at step %d" % (best_measures[0], best_steps[0]))
-                print("Best Depth abserl: %f, at step %d" % (best_measures[1], best_steps[1]))
-                print("Best Depth a1: %f, at step %d" % (best_measures[2], best_steps[2]))
+                eval_summary_writer_Shape.add_scalar('Shape_L1Measure', eval_measures_shape[0], int(global_step))
+                eval_summary_writer_Depth.add_scalar('Depth_absrel', eval_measures_depth[1], int(global_step))
+                eval_summary_writer_Depth.add_scalar('Depth_a1', eval_measures_depth[6], int(global_step))
 
                 if epoch >= 10:
                     for kk in best_measures.shape[0]:
@@ -458,6 +455,10 @@ def main_worker(gpu, ngpus_per_node, args):
                             torch.save(checkpoint, os.path.join(args.log_directory, args.model_name, model_save_name))
                         if version_num > 1100000000:
                             eval_summary_writer.flush()
+                print("Best Shape L1: %f, at step %d" % (best_measures[0], best_steps[0]))
+                print("Best Depth abserl: %f, at step %d" % (best_measures[1], best_steps[1]))
+                print("Best Depth a1: %f, at step %d" % (best_measures[2], best_steps[2]))
+
                 model.train()
                 block_print()
                 enable_print()
