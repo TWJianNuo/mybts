@@ -454,8 +454,8 @@ def main_worker(gpu, ngpus_per_node, args):
                                           }
                             torch.save(checkpoint, os.path.join(args.log_directory, args.model_name, model_save_name))
                         if version_num > 1100000000:
-                            eval_measures_shape.flush()
-                            eval_measures_depth.flush()
+                            eval_summary_writer_Shape.flush()
+                            eval_summary_writer_Depth.flush()
                 print("Best Shape L1: %f, at step %d" % (best_measures[0], best_steps[0]))
                 print("Best Depth abserl: %f, at step %d" % (best_measures[1], best_steps[1]))
                 print("Best Depth a1: %f, at step %d" % (best_measures[2], best_steps[2]))
