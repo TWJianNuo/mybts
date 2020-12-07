@@ -362,8 +362,8 @@ def main_worker(gpu, ngpus_per_node, args):
                 time.sleep(0.1)
                 model.eval()
                 eval_measures_depth = online_eval(model, dataloader_eval, gpu, ngpus_per_node)
-                eval_summary_writer.add_scalar('Depth_absrel_semidense', eval_measures_depth[1], int(global_step))
-                eval_summary_writer.add_scalar('Depth_a1_semidense', eval_measures_depth[6], int(global_step))
+                eval_summary_writer.add_scalar('Depth_absrel', eval_measures_depth[1], int(global_step))
+                eval_summary_writer.add_scalar('Depth_a1', eval_measures_depth[6], int(global_step))
                 if epoch >= 10:
                     for kk in range(best_measures.shape[0]):
                         is_best = False
