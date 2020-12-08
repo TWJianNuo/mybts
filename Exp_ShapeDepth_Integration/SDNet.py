@@ -14,6 +14,7 @@ import torchvision.models as models
 import torch.utils.model_zoo as model_zoo
 from collections import OrderedDict
 import torch.nn.functional as F
+from integrationModule import CRFIntegrationModule
 
 def upsample(x):
     """Upsample input tensor by a factor of 2
@@ -136,17 +137,19 @@ class ResnetEncoder(nn.Module):
         self.features.append(self.encoder.layer4(self.features[-1]))
         return self.features
 
-class DepthDecoder(nn.Module):
-    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_skips=True):
-        super(DepthDecoder, self).__init__()
+class MultiModalityDecoder(nn.Module):
+    def __init__(self, num_ch_enc, nchannelout=[1, 2, 1, 1], additionalblocks=2):
+        super(MultiModalityDecoder, self).__init__()
 
-        self.num_output_channels = num_output_channels
-        self.use_skips = use_skips
+        assert additionalblocks >= 0
+        self.modalities = ['depth', 'shape', 'variance', 'lambda']
+        self.nchannelout = nchannelout
         self.upsample_mode = 'nearest'
-        self.scales = scales
+        self.scales = range(4)
+        self.additionalblocks = additionalblocks
 
         self.num_ch_enc = num_ch_enc
-        self.num_ch_dec = np.array([16, 32, 64, 128, 256])
+        self.num_ch_dec = np.array([24, 48, 96, 192, 384])
 
         # decoder
         self.convs = OrderedDict()
@@ -158,13 +161,31 @@ class DepthDecoder(nn.Module):
 
             # upconv_1
             num_ch_in = self.num_ch_dec[i]
-            if self.use_skips and i > 0:
+            if i > 0:
                 num_ch_in += self.num_ch_enc[i - 1]
             num_ch_out = self.num_ch_dec[i]
             self.convs[("upconv", i, 1)] = ConvBlock(num_ch_in, num_ch_out)
 
+        # Four scales for depth
         for s in self.scales:
-            self.convs[("dispconv", s)] = Conv3x3(self.num_ch_dec[s], self.num_output_channels)
+            for k in range(self.additionalblocks):
+                self.convs[('depth', s, k)] = ConvBlock(self.num_ch_dec[s], self.num_ch_dec[s])
+            self.convs[('depth', s)] = Conv3x3(self.num_ch_dec[s], self.nchannelout[0])
+
+        # Single scale for shape
+        for k in range(self.additionalblocks):
+            self.convs[('shape', 0, k)] = ConvBlock(self.num_ch_dec[0], self.num_ch_dec[0])
+        self.convs[('shape', 0)] = Conv3x3(self.num_ch_dec[0], self.nchannelout[1])
+
+        # Single scale for variance
+        for k in range(self.additionalblocks):
+            self.convs[('variance', 0, k)] = ConvBlock(self.num_ch_dec[0], self.num_ch_dec[0])
+        self.convs[('variance', 0)] = Conv3x3(self.num_ch_dec[0], self.nchannelout[1])
+
+        # Single scale for lambda
+        for k in range(self.additionalblocks):
+            self.convs[('lambda', 0, k)] = ConvBlock(self.num_ch_dec[0], self.num_ch_dec[0])
+        self.convs[('lambda', 0)] = Conv3x3(self.num_ch_dec[0], self.nchannelout[1])
 
         self.decoder = nn.ModuleList(list(self.convs.values()))
         self.sigmoid = nn.Sigmoid()
@@ -177,21 +198,60 @@ class DepthDecoder(nn.Module):
         for i in range(4, -1, -1):
             x = self.convs[("upconv", i, 0)](x)
             x = [upsample(x)]
-            if self.use_skips and i > 0:
+            if i > 0:
                 x += [input_features[i - 1]]
             x = torch.cat(x, 1)
             x = self.convs[("upconv", i, 1)](x)
+
+            # Depth
             if i in self.scales:
-                self.outputs[("disp", i)] = self.sigmoid(self.convs[("dispconv", i)](x))
+                xmodality = x.clone()
+                for k in range(self.additionalblocks):
+                    xmodality = self.convs[('depth', i, k)](xmodality)
+                self.outputs[('depth', i)] = self.sigmoid(self.convs[('depth', i)](xmodality))
 
-        return self.outputs[("disp", 0)]
+            # Shape
+            if i == 0:
+                xmodality = x.clone()
+                for k in range(self.additionalblocks):
+                    xmodality = self.convs[('shape', i, k)](xmodality)
+                self.outputs[('shape', i)] = self.sigmoid(self.convs[('shape', i)](xmodality))
 
+            # Variance
+            if i == 0:
+                xmodality = x.clone()
+                for k in range(self.additionalblocks):
+                    xmodality = self.convs[('variance', i, k)](xmodality)
+                self.outputs[('variance', i)] = self.sigmoid(self.convs[('variance', i)](xmodality))
+
+            # Lambda
+            if i == 0:
+                xmodality = x.clone()
+                for k in range(self.additionalblocks):
+                    xmodality = self.convs[('lambda', i, k)](xmodality)
+                self.outputs[('lambda', i)] = self.sigmoid(self.convs[('lambda', i)](xmodality))
+
+        return self.outputs
 
 class ShapeNet(nn.Module):
-    def __init__(self):
+    def __init__(self, args):
         super(ShapeNet, self).__init__()
+        self.args = args
         self.encoder = ResnetEncoder(50, pretrained=True)
-        self.decoder = DepthDecoder(self.encoder.num_ch_enc, num_output_channels=2)
+        self.decoder = MultiModalityDecoder(self.encoder.num_ch_enc, nchannelout=[1, 2], additionalblocks=2)
 
     def forward(self, x):
-        return (self.decoder(self.encoder(x)) - 0.5) * 2 * np.pi
+        outputs = self.decoder(self.encoder(x))
+
+        for key in outputs.keys():
+            if 'depth' in key:
+                outputs[key] = self.args.min_depth + outputs[key] * (self.args.max_depth - self.args.min_depth)
+            elif 'shape' in key:
+                outputs[key] = (outputs[key] - 0.5) * 2 * np.pi
+            elif 'variance' in key:
+                outputs[key] = outputs[key] * (self.args.clipvariance + 1)
+            elif 'lambda' in key:
+                continue
+            else:
+                raise Exception("Specified modality is not initiated")
+        return outputs
