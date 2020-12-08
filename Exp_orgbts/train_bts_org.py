@@ -16,19 +16,28 @@
 
 import time
 import argparse
+import datetime
 import sys
+import os
+
+import torch
+import torch.nn as nn
+import torch.nn.utils as utils
 
 import torch.backends.cudnn as cudnn
+import torch.distributed as dist
 import torch.multiprocessing as mp
 
 from torch.utils.tensorboard import SummaryWriter
 
 import matplotlib
 import matplotlib.cm
+import threading
 from tqdm import tqdm
 
+from bts import BtsModel
 from bts_dataloader import *
-from util import *
+
 
 def convert_arg_line_to_args(arg_line):
     for arg in arg_line.split():
@@ -73,7 +82,6 @@ parser.add_argument('--num_epochs',                type=int,   help='number of e
 parser.add_argument('--learning_rate',             type=float, help='initial learning rate', default=1e-4)
 parser.add_argument('--end_learning_rate',         type=float, help='end learning rate', default=-1)
 parser.add_argument('--variance_focus',            type=float, help='lambda in paper: [0, 1], higher value more focus on minimizing variance of error', default=0.85)
-parser.add_argument('--usesyncnorm',               action='store_true')
 
 # Preprocessing
 parser.add_argument('--do_random_rotate',                      help='if set, will perform random rotation for augmentation', action='store_true')
@@ -247,7 +255,6 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
             focal = torch.autograd.Variable(eval_sample_batched['focal'].cuda(gpu, non_blocking=True))
             gt_depth = eval_sample_batched['depth']
             has_valid_depth = eval_sample_batched['has_valid_depth']
-            gt_shape = eval_sample_batched['gt_shape']
             if not has_valid_depth:
                 # print('Invalid depth. continue.')
                 continue
@@ -273,16 +280,17 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
         valid_mask = np.logical_and(gt_depth > args.min_depth_eval, gt_depth < args.max_depth_eval)
 
         if args.garg_crop or args.eigen_crop:
-            gt_height, gt_width = gt_shape.numpy()[0,0,:]
+            gt_height, gt_width = gt_depth.shape
             eval_mask = np.zeros(valid_mask.shape)
 
-            top_margin = int(gt_shape[0,0,0] - 352)
-            left_margin = int((gt_shape[0,0,1] - 1216) / 2)
             if args.garg_crop:
-                eval_mask[int(0.40810811 * gt_height)-top_margin:int(0.99189189 * gt_height)-top_margin, int(0.03594771 * gt_width)-left_margin:int(0.96405229 * gt_width)-left_margin] = 1
+                eval_mask[int(0.40810811 * gt_height):int(0.99189189 * gt_height), int(0.03594771 * gt_width):int(0.96405229 * gt_width)] = 1
 
             elif args.eigen_crop:
-                eval_mask[int(0.3324324 * gt_height)-top_margin:int(0.91351351 * gt_height)-top_margin, int(0.0359477 * gt_width)-left_margin:int(0.96405229 * gt_width)-left_margin] = 1
+                if args.dataset == 'kitti':
+                    eval_mask[int(0.3324324 * gt_height):int(0.91351351 * gt_height), int(0.0359477 * gt_width):int(0.96405229 * gt_width)] = 1
+                else:
+                    eval_mask[45:471, 41:601] = 1
 
             valid_mask = np.logical_and(valid_mask, eval_mask)
 
@@ -424,11 +432,6 @@ def main_worker(gpu, ngpus_per_node, args):
     num_total_steps = args.num_epochs * steps_per_epoch
     epoch = global_step // steps_per_epoch
 
-    besta1 = -1e10
-    bestabsrel = 1e10
-    besta1performance = None
-    bestabsrelperformance = None
-
     while epoch < args.num_epochs:
         if args.distributed:
             dataloader.train_sampler.set_epoch(epoch)
@@ -504,20 +507,6 @@ def main_worker(gpu, ngpus_per_node, args):
                 model.eval()
                 eval_measures = online_eval(model, dataloader_eval, gpu, ngpus_per_node)
                 if eval_measures is not None:
-                    if besta1 < eval_measures[6]:
-                        besta1performance = eval_measures
-                        besta1 = eval_measures[6]
-                    if bestabsrel > eval_measures[1]:
-                        bestabsrelperformance = eval_measures
-                        bestabsrel = eval_measures[1]
-
-                    print("\nBest A1 Performance")
-                    print(("{:>8} | " * 9).format(*eval_metrics))
-                    print(("&{: 8.3f}  " * 9).format(*besta1performance.tolist()) + "\\\\")
-                    print("\nBest Absrel Performance")
-                    print(("{:>8} | " * 9).format(*eval_metrics))
-                    print(("&{: 8.3f}  " * 9).format(*bestabsrelperformance.tolist()) + "\\\\")
-
                     for i in range(9):
                         eval_summary_writer.add_scalar(eval_metrics[i], eval_measures[i].cpu(), int(global_step))
                         measure = eval_measures[i]
@@ -530,7 +519,7 @@ def main_worker(gpu, ngpus_per_node, args):
                             old_best = best_eval_measures_higher_better[i-6].item()
                             best_eval_measures_higher_better[i-6] = measure.item()
                             is_best = True
-                        if is_best and (i == 1 or i == 6):
+                        if is_best:
                             old_best_step = best_eval_steps[i]
                             old_best_name = '/model-{}-best_{}_{:.5f}'.format(old_best_step, eval_metrics[i], old_best)
                             model_path = args.log_directory + '/' + args.model_name + old_best_name
@@ -565,28 +554,6 @@ def main():
         print('bts_main.py is only for training. Use bts_test.py instead.')
         return -1
 
-    model_filename = args.model_name + '.py'
-    command = 'mkdir ' + args.log_directory + '/' + args.model_name
-    os.system(command)
-
-    if args.checkpoint_path == '':
-        model_out_path = args.log_directory + '/' + args.model_name + '/' + model_filename
-        command = 'cp bts.py ' + model_out_path
-        os.system(command)
-        aux_out_path = args.log_directory + '/' + args.model_name + '/.'
-        command = 'cp bts_main.py ' + aux_out_path
-        os.system(command)
-        command = 'cp bts_dataloader.py ' + aux_out_path
-        os.system(command)
-    else:
-        loaded_model_dir = os.path.dirname(args.checkpoint_path)
-        loaded_model_name = os.path.basename(loaded_model_dir)
-        loaded_model_filename = loaded_model_name + '.py'
-
-        model_out_path = args.log_directory + '/' + args.model_name + '/' + model_filename
-        command = 'cp ' + loaded_model_dir + '/' + loaded_model_filename + ' ' + model_out_path
-        os.system(command)
-
     torch.cuda.empty_cache()
     args.distributed = args.world_size > 1 or args.multiprocessing_distributed
 
@@ -597,14 +564,14 @@ def main():
 
     if args.do_online_eval:
         print("You have specified --do_online_eval.")
-        print("This will evaluate the model every eval_freq {} steps and save best models for individual eval metrics."
-              .format(args.eval_freq))
+        print("This will evaluate the model every eval_freq {} steps and save best models for individual eval metrics." .format(args.eval_freq))
 
     if args.multiprocessing_distributed:
         args.world_size = ngpus_per_node * args.world_size
         mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
     else:
         main_worker(args.gpu, ngpus_per_node, args)
+
 
 if __name__ == '__main__':
     main()
