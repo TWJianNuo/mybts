@@ -82,7 +82,7 @@ class CRFIntegrationModule(nn.Module):
         for k in range(times):
             lateralre = self.intfunc(pred_log, mask, variance, depthout, self.clipvariance, self.maxrange)
             optselector = (lateralre > 0).float()
-            depthout = (1 - optselector) * depthin + optselector * (depthin * lam + lateralre * (1 - lam))
+            depthout = (1 - optselector) * depthin + optselector * (depthin * (1 - lam) + lateralre * lam)
         return depthout
 
     def compute_lateralre(self, pred_log, mask, variance, depthin):
