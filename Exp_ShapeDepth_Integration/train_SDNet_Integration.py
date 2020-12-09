@@ -87,7 +87,7 @@ parser.add_argument('--min_depth',                 type=float, help="min depth v
 parser.add_argument('--max_depth',                 type=float, help="max depth value", default=100)
 parser.add_argument('--depthlossw',                type=float, help="weight of loss on depth", default=1e-2)
 parser.add_argument('--variancelossw',             type=float, help="mounted to depth loss", default=1)
-parser.add_argument('--startstep',                type=int,   help="mounted to depth loss", default=5000)
+parser.add_argument('--startstep',                 type=int,   help="mounted to depth loss", default=5000)
 
 parser.add_argument("--inttimes",               type=int,     default=1)
 parser.add_argument("--clipvariance",           type=float,   default=5)
@@ -183,8 +183,8 @@ def online_eval(model, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, ng
             depth_gt_flatten = depth_gt[valid_mask].cpu().numpy()
 
             # Compute Measurement for Lateralre
-            compute_lateralre(integrater=crfIntegrater, normoptizer=normoptizer_eval, outputs=outputs, intrinsic=K, depth_gt=depth_gt, scales=1)
-            depth_latrealre = outputs[('lateralre', 0)]
+            compute_intre(integrater=crfIntegrater, normoptizer=normoptizer_eval, outputs=outputs, intrinsic=K, depth_gt=depth_gt, scales=1)
+            depth_latrealre = outputs[('intre', 0)]
             depth_latrealre = torch.clamp(depth_latrealre, min=args.min_depth_eval, max=args.max_depth_eval)
             depth_latrealre_flatten = depth_latrealre[valid_mask].cpu().numpy()
 
@@ -196,7 +196,7 @@ def online_eval(model, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, ng
 
             eval_measures_shape[1] += 1
             eval_measures_depth[9] += 1
-            eval_measures_lateralre[9] +=1
+            eval_measures_lateralre[9] += 1
 
     if args.multiprocessing_distributed:
         group = dist.new_group([i for i in range(ngpus)])
@@ -220,7 +220,7 @@ def online_eval(model, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, ng
             print('{:7.3f}, '.format(eval_measures_depth[i]), end='')
         print('{:7.3f}'.format(eval_measures_depth[8]))
 
-        print('Computing LatrealReDepth errors for {} eval samples'.format(int(eval_measures_lateralre[-1])))
+        print('Computing IntegratedReDepth errors for {} eval samples'.format(int(eval_measures_lateralre[-1])))
         print("{:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}".format('silog', 'abs_rel', 'log10', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3'))
         for i in range(8):
             print('{:7.3f}, '.format(eval_measures_lateralre[i]), end='')
@@ -242,7 +242,7 @@ def compute_depth_loss(outputs, depth_gt):
     loss = loss / 4
     return loss
 
-def compute_lateralre(integrater, normoptizer, outputs, intrinsic, depth_gt, scales=4):
+def compute_intre(integrater, normoptizer, outputs, intrinsic, depth_gt, scales=4):
     pred_log = normoptizer.ang2log(intrinsic=intrinsic, ang=outputs[('shape', 0)])
     variance = outputs[('variance', 0)]
 
@@ -258,16 +258,16 @@ def compute_lateralre(integrater, normoptizer, outputs, intrinsic, depth_gt, sca
 
     for k in range(scales):
         outputs[('depth', k)] = F.interpolate(outputs[('depth', k)], [h, w], mode='bilinear', align_corners=False)
-        outputs[('lateralre', k)] = integrater.compute_lateralre(pred_log=pred_log, mask=mask, variance=variance, depthin=outputs[('depth', k)])
+        outputs[('intre', k)] = integrater.forward(pred_log=pred_log, mask=mask, variance=variance, depthin=outputs[('depth', k)], lam=outputs[('lambda', 0)])
 
 def compute_variance_loss(integrater, normoptizer, outputs, intrinsic, depth_gt):
     gtselector = (depth_gt > 0).float()
 
-    compute_lateralre(integrater, normoptizer, outputs, intrinsic, depth_gt, scales=4)
+    compute_intre(integrater, normoptizer, outputs, intrinsic, depth_gt, scales=4)
 
     loss = 0
     for k in range(4):
-        loss += torch.sum(torch.abs(outputs[('lateralre', k)] - depth_gt) * gtselector) / (torch.sum(gtselector) + 1)
+        loss += torch.sum(torch.abs(outputs[('intre', k)] - depth_gt) * gtselector) / (torch.sum(gtselector) + 1)
     loss = loss / 4
     return loss
 
@@ -374,7 +374,7 @@ def main_worker(gpu, ngpus_per_node, args):
     if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
         writer = SummaryWriter(os.path.join(args.log_directory, args.model_name, 'summaries'), flush_secs=30)
         eval_summary_writer_Depth = SummaryWriter(os.path.join(args.log_directory, 'eval_Depth', args.model_name), flush_secs=30)
-        eval_summary_writer_Depth_lateralre = SummaryWriter(os.path.join(args.log_directory, 'eval_Depth', "{}_{}".format(args.model_name, 'lateralre')), flush_secs=30)
+        eval_summary_writer_Depth_lateralre = SummaryWriter(os.path.join(args.log_directory, 'eval_Depth', "{}_{}".format(args.model_name, 'intre')), flush_secs=30)
         eval_summary_writer_Shape = SummaryWriter(os.path.join(args.log_directory, 'eval', args.model_name), flush_secs=30)
 
     start_time = time.time()
@@ -456,7 +456,7 @@ def main_worker(gpu, ngpus_per_node, args):
                     pred_depth = outputs[('depth', 0)]
                     fig_depth = tensor2disp(1/pred_depth, vmax=0.15, viewind=viewind)
 
-                    pred_lateralre = outputs[('lateralre', 0)]
+                    pred_lateralre = outputs[('intre', 0)]
                     fig_lateralre = tensor2disp(1 / pred_lateralre, vmax=0.15, viewind=viewind)
                     fig_variance = tensor2disp(outputs[('variance', 0)], vmax=(args.clipvariance + 1), viewind=viewind)
                     fig_intmask = tensor2disp(outputs['intmask'], vmax=1, viewind=viewind)
