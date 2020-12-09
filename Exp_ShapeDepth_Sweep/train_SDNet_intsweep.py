@@ -421,6 +421,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 w = get_w(start_step=steps_per_epoch * args.startepoch, end_step=steps_per_epoch * args.endepoch, step=global_step)
                 loss = (args.depthlossw * depthloss + shapeloss) * (1 - w) + w * varianceloss
             else:
+                w = 0
                 loss = args.depthlossw * depthloss + shapeloss
 
             loss.backward()
@@ -448,6 +449,7 @@ def main_worker(gpu, ngpus_per_node, args):
                     writer.add_scalar('depthloss', depthloss, global_step)
                     writer.add_scalar('varianceloss', varianceloss, global_step)
                     writer.add_scalar('totloss', loss, global_step)
+                    writer.add_scalar('w', w, global_step)
 
                     minang = - np.pi / 3 * 2
                     maxang = 2 * np.pi - np.pi / 3 * 2
