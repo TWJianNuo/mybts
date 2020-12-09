@@ -34,7 +34,6 @@ from util import *
 from torchvision import transforms
 import torch.utils.data.distributed
 import torch.distributed as dist
-from integrationModule import CRFIntegrationModule
 
 version_num = torch.__version__
 version_num = ''.join(i for i in version_num if i.isdigit())
@@ -157,10 +156,9 @@ def block_print():
 def enable_print():
     sys.stdout = sys.__stdout__
 
-def online_eval(model, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, ngpus):
+def online_eval(model, normoptizer_eval, dataloader_eval, gpu, ngpus):
     eval_measures_shape = torch.zeros(2).cuda(device=gpu)
     eval_measures_depth = torch.zeros(10).cuda(device=gpu)
-    eval_measures_lateralre = torch.zeros(10).cuda(device=gpu)
     for _, eval_sample_batched in enumerate(tqdm(dataloader_eval.data)):
         with torch.no_grad():
             if 'depth' not in eval_sample_batched:
@@ -251,15 +249,11 @@ def main_worker(gpu, ngpus_per_node, args):
         normoptizer_eval = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=1, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
         normoptizer.to(f'cuda:{args.gpu}')
         normoptizer_eval.to(f'cuda:{args.gpu}')
-        crfIntegrater = CRFIntegrationModule(clipvariance=args.clipvariance, maxrange=args.maxrange)
-        crfIntegrater.to(f'cuda:{args.gpu}')
     else:
         normoptizer = SurfaceNormalOptimizer(height=args.input_height, width=args.input_width, batch_size=int(args.batch_size), angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
         normoptizer_eval = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=1, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
         normoptizer = normoptizer.cuda()
         normoptizer_eval = normoptizer_eval.cuda()
-        crfIntegrater = CRFIntegrationModule(clipvariance=args.clipvariance, maxrange=args.maxrange)
-        crfIntegrater = crfIntegrater.cuda()
 
     if args.distributed:
         if args.gpu is not None:
@@ -423,7 +417,7 @@ def main_worker(gpu, ngpus_per_node, args):
             if args.do_online_eval and global_step and global_step % args.eval_freq == 0 and not model_just_loaded:
                 time.sleep(0.1)
                 model.eval()
-                eval_measures_shape, eval_measures_depth = online_eval(model=model, normoptizer_eval=normoptizer_eval, crfIntegrater=crfIntegrater, dataloader_eval=dataloader_eval, gpu=gpu, ngpus=ngpus_per_node)
+                eval_measures_shape, eval_measures_depth = online_eval(model=model, normoptizer_eval=normoptizer_eval, dataloader_eval=dataloader_eval, gpu=gpu, ngpus=ngpus_per_node)
                 eval_summary_writer_Shape.add_scalar('L1Measure_semidense', eval_measures_shape[0], int(global_step))
                 eval_summary_writer_Depth.add_scalar('Depth_absrel_semidense', eval_measures_depth[1], int(global_step))
                 eval_summary_writer_Depth.add_scalar('Depth_a1_semidense', eval_measures_depth[6], int(global_step))

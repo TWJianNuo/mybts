@@ -14,7 +14,6 @@ import torchvision.models as models
 import torch.utils.model_zoo as model_zoo
 from collections import OrderedDict
 import torch.nn.functional as F
-from integrationModule import CRFIntegrationModule
 
 def upsample(x):
     """Upsample input tensor by a factor of 2
