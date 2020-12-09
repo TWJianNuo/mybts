@@ -28,8 +28,8 @@ import matplotlib
 import matplotlib.cm
 from tqdm import tqdm
 
-from Exp_ShapeDepth_latrealRe.shapedataset import KittiShapeDataLoader, KittiShapeDataset
-from Exp_ShapeDepth_latrealRe.SDNet import ShapeNet
+from Exp_ShapeDepth_NoIntegration.shapedataset import KittiShapeDataLoader, KittiShapeDataset
+from Exp_ShapeDepth_NoIntegration.SDNet import ShapeNet
 from util import *
 from torchvision import transforms
 import torch.utils.data.distributed
