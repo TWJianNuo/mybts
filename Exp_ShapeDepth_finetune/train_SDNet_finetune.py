@@ -93,6 +93,8 @@ parser.add_argument('--max_depth',                 type=float, help="max depth v
 parser.add_argument("--inttimes",               type=int,     default=1)
 parser.add_argument("--clipvariance",           type=float,   default=5)
 parser.add_argument("--maxrange",               type=float,   default=100)
+parser.add_argument("--lateralw",               type=float,   default=1)
+
 
 # Preprocessing
 parser.add_argument('--do_kb_crop',                            help='if set, crop input images as kitti benchmark images', action='store_true')
@@ -182,7 +184,7 @@ def online_eval(shapemodel, depthmodel, intmodel, normoptizer_eval, crfIntegrate
             eval_measures_shape[0] += loss_shape
 
             # Compute Measurement for Lateralre
-            depth_latrealre, _ = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer_eval, pred_shape=pred_shape, pred_depth=pred_depth, pred_variance=outputs_int[('variance', 0)], pred_lambda=outputs_int[('lambda', 0)], intrinsic=K, depth_gt=depth_gt)
+            depth_latrealre, _, _ = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer_eval, pred_shape=pred_shape, pred_depth=pred_depth, pred_variance=outputs_int[('variance', 0)], pred_lambda=outputs_int[('lambda', 0)], intrinsic=K, depth_gt=depth_gt)
             depth_latrealre = torch.clamp(depth_latrealre, min=args.min_depth_eval, max=args.max_depth_eval)
             depth_latrealre_flatten = depth_latrealre[valid_mask].cpu().numpy()
 
@@ -262,14 +264,10 @@ def compute_intre(integrater, normoptizer, pred_shape, pred_depth, pred_variance
     mask[:, :, 0:100, :] = 0
     mask = mask.int().contiguous()
 
-    intre = integrater.forward(pred_log=pred_log, mask=mask, variance=pred_variance, depthin=pred_depth, lam=pred_lambda)
-    return intre, mask
-
-def compute_int_loss(integrater, normoptizer, pred_shape, pred_depth, pred_variance, pred_lambda, intrinsic, depth_gt):
-    gtselector = (depth_gt > 0).float()
-    intre, mask = compute_intre(integrater, normoptizer, pred_shape, pred_depth, pred_variance, pred_lambda, intrinsic, depth_gt)
-    loss = torch.sum(torch.abs(intre - depth_gt) * gtselector) / (torch.sum(gtselector) + 1)
-    return loss, intre, mask
+    lateralre = integrater.compute_lateralre(pred_log=pred_log, mask=mask, variance=pred_variance, depthin=pred_depth)
+    optselector = (lateralre > 0).float()
+    intre = (1 - optselector) * pred_depth + optselector * (pred_depth * (1 - pred_lambda) + lateralre * pred_lambda)
+    return intre, lateralre, mask
 
 def rename_state_dict(state_dict):
     new_state_dict = dict()
@@ -425,9 +423,11 @@ def main_worker(gpu, ngpus_per_node, args):
                 pred_shape = shapemodel(image)
             outputs_int = model(image)
 
-            intre, mask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer, pred_shape=pred_shape, pred_depth=outputs_depth['depth', 0], pred_variance=outputs_int[('variance', 0)], pred_lambda=outputs_int[('lambda', 0)], intrinsic=K, depth_gt=depth_gt)
+            intre, lateralre, mask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer, pred_shape=pred_shape, pred_depth=outputs_depth['depth', 0], pred_variance=outputs_int[('variance', 0)], pred_lambda=outputs_int[('lambda', 0)], intrinsic=K, depth_gt=depth_gt)
             gtselector = (depth_gt > 0).float()
-            loss = torch.sum(torch.abs(intre - depth_gt) * gtselector) / (torch.sum(gtselector) + 1)
+            loss_int = torch.sum(torch.abs(intre - depth_gt) * gtselector) / (torch.sum(gtselector) + 1)
+            loss_lateral = torch.sum(torch.abs(lateralre - depth_gt) * gtselector) / (torch.sum(gtselector) + 1)
+            loss = loss_int + loss_lateral * args.lateralw
             loss.backward()
             optimizer.step()
 
