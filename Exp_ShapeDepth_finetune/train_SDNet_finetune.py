@@ -93,7 +93,7 @@ parser.add_argument('--max_depth',                 type=float, help="max depth v
 parser.add_argument("--inttimes",               type=int,     default=1)
 parser.add_argument("--clipvariance",           type=float,   default=5)
 parser.add_argument("--maxrange",               type=float,   default=100)
-parser.add_argument("--lateralw",               type=float,   default=1)
+parser.add_argument("--intrew",                 type=float,   default=0)
 
 
 # Preprocessing
@@ -427,7 +427,7 @@ def main_worker(gpu, ngpus_per_node, args):
             gtselector = (depth_gt > 0).float()
             loss_int = torch.sum(torch.abs(intre - depth_gt) * gtselector) / (torch.sum(gtselector) + 1)
             loss_lateral = torch.sum(torch.abs(lateralre - depth_gt) * gtselector) / (torch.sum(gtselector) + 1)
-            loss = loss_int + loss_lateral * args.lateralw
+            loss = loss_int * args.intrew + loss_lateral
             loss.backward()
             optimizer.step()
 
