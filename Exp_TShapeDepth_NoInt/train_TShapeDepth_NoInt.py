@@ -437,7 +437,7 @@ def main_worker(gpu, ngpus_per_node, args):
             if args.do_online_eval and global_step and global_step % args.eval_freq == 0 and not model_just_loaded:
                 time.sleep(0.1)
                 model.eval()
-                eval_measures_shape, eval_measures_depth = online_eval(model=model, normoptizer_eval=normoptizer_eval, crfIntegrater=crfIntegrater, dataloader_eval=dataloader_eval, gpu=gpu, ngpus=ngpus_per_node)
+                eval_measures_shape, eval_measures_depth = online_eval(model=model, normoptizer_eval=normoptizer_eval, dataloader_eval=dataloader_eval, gpu=gpu, ngpus=ngpus_per_node)
                 eval_summary_writer_Shape.add_scalar('L1Measure_semidense', eval_measures_shape[0], int(global_step))
                 eval_summary_writer_Depth.add_scalar('Depth_absrel_semidense', eval_measures_depth[1], int(global_step))
                 eval_summary_writer_Depth.add_scalar('Depth_a1_semidense', eval_measures_depth[6], int(global_step))
