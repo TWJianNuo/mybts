@@ -87,7 +87,6 @@ parser.add_argument('--min_depth',                 type=float, help="min depth v
 parser.add_argument('--max_depth',                 type=float, help="max depth value", default=100)
 parser.add_argument('--laterallossw',              type=float, help="mounted to depth loss", default=1)
 parser.add_argument('--intlossw',                  type=float, help="mounted to depth loss", default=1)
-parser.add_argument('--startstep',                 type=int,   help="mounted to depth loss", default=5000)
 
 parser.add_argument("--inttimes",               type=int,     default=1)
 parser.add_argument("--clipvariance",           type=float,   default=5)
