@@ -28,10 +28,8 @@ import matplotlib
 import matplotlib.cm
 from tqdm import tqdm
 
-from Exp_ShapeDepth_finetune.shapedataset import KittiShapeDataLoader, KittiShapeDataset
-from Exp_ShapeDepth_finetune.IntNet import IntNet
-from Exp_ShapeDepth_finetune.DepthNet import DepthNet
-from Exp_ShapeDepth_finetune.ShapeNet import ShapeNet
+from Exp_TShapeDepth_baseline.shapedataset import KittiShapeDataLoader, KittiShapeDataset
+from Exp_TShapeDepth_baseline.SDNet import SDNet
 from util import *
 from torchvision import transforms
 import torch.utils.data.distributed
@@ -71,8 +69,6 @@ parser.add_argument('--log_directory',             type=str,   help='directory t
 parser.add_argument('--checkpoint_path',           type=str,   help='path to a checkpoint to load', default='')
 parser.add_argument('--log_freq',                  type=int,   help='Logging frequency in global steps', default=100)
 parser.add_argument('--save_freq',                 type=int,   help='Checkpoint saving frequency in global steps', default=500)
-parser.add_argument('--depth_checkpoint_path',           type=str,   help='path to a checkpoint to load', default='')
-parser.add_argument('--shape_checkpoint_path',           type=str,   help='path to a checkpoint to load', default='')
 
 # Training
 parser.add_argument('--fix_first_conv_blocks',                 help='if set, will fix the first two conv blocks', action='store_true')
@@ -89,14 +85,13 @@ parser.add_argument('--vlossw',                    type=float, default=1)
 parser.add_argument('--sclw',                      type=float, default=1e-3)
 parser.add_argument('--min_depth',                 type=float, help="min depth value", default=0.1)
 parser.add_argument('--max_depth',                 type=float, help="max depth value", default=100)
+parser.add_argument('--laterallossw',              type=float, help="mounted to depth loss", default=1)
+parser.add_argument('--intlossw',                  type=float, help="mounted to depth loss", default=1)
+parser.add_argument('--startstep',                 type=int,   help="mounted to depth loss", default=5000)
 
 parser.add_argument("--inttimes",               type=int,     default=1)
 parser.add_argument("--clipvariance",           type=float,   default=5)
 parser.add_argument("--maxrange",               type=float,   default=100)
-parser.add_argument("--intrew",                 type=float,   default=1)
-parser.add_argument('--startepoch',                type=int,   help="mounted to depth loss", default=5)
-parser.add_argument('--endepoch',                  type=int,   help="mounted to depth loss", default=20)
-
 
 # Preprocessing
 parser.add_argument('--do_kb_crop',                            help='if set, crop input images as kitti benchmark images', action='store_true')
@@ -162,9 +157,10 @@ def block_print():
 def enable_print():
     sys.stdout = sys.__stdout__
 
-def online_eval(shapemodel, depthmodel, intmodel, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, ngpus):
+def online_eval(model, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, ngpus):
     eval_measures_shape = torch.zeros(2).cuda(device=gpu)
     eval_measures_depth = torch.zeros(10).cuda(device=gpu)
+    eval_measures_lateralre = torch.zeros(10).cuda(device=gpu)
     eval_measures_intre = torch.zeros(10).cuda(device=gpu)
     for _, eval_sample_batched in enumerate(tqdm(dataloader_eval.data)):
         with torch.no_grad():
@@ -173,120 +169,112 @@ def online_eval(shapemodel, depthmodel, intmodel, normoptizer_eval, crfIntegrate
             image = torch.autograd.Variable(eval_sample_batched['image'].cuda(args.gpu, non_blocking=True))
             K = torch.autograd.Variable(eval_sample_batched['K'].cuda(gpu, non_blocking=True))
             depth_gt = torch.autograd.Variable(eval_sample_batched['depth'].cuda(args.gpu, non_blocking=True))
-            outputs_depth = depthmodel(image)
-            pred_shape = shapemodel(image)
-            outputs_int = intmodel(image)
-
-            pred_depth = outputs_depth[('depth', 0)]
-            valid_mask = (depth_gt > args.min_depth_eval) * (depth_gt < args.max_depth_eval)
-            valid_mask = valid_mask == 1
+            shape_pred, depth_pred, variance_pred, lambda_pred = model(image)
+            int_re, lateral_re, mask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer_eval, intrinsic=K, depth_gt=depth_gt, shape_pred=shape_pred, depth_pred=depth_pred, variance_pred=variance_pred, lambda_pred=lambda_pred)
 
             # Compute Measurement for Shape
-            loss_shape = normoptizer_eval.intergrationloss_ang_validation(ang=pred_shape, intrinsic=K, depthMap=depth_gt)
+            loss_shape = normoptizer_eval.intergrationloss_ang_validation(ang=shape_pred, intrinsic=K, depthMap=depth_gt)
             eval_measures_shape[0] += loss_shape
 
-            # Compute Measurement for Lateralre
-            depth_latrealre, _, _ = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer_eval, pred_shape=pred_shape, pred_depth=pred_depth, pred_variance=outputs_int[('variance', 0)], pred_lambda=outputs_int[('lambda', 0)], intrinsic=K, depth_gt=depth_gt)
-            depth_latrealre = torch.clamp(depth_latrealre, min=args.min_depth_eval, max=args.max_depth_eval)
-            depth_latrealre_flatten = depth_latrealre[valid_mask].cpu().numpy()
-
             # Compute Measurement for Depth
+            pred_depth = depth_pred
             pred_depth = torch.clamp(pred_depth, min=args.min_depth_eval, max=args.max_depth_eval)
+            valid_mask = (depth_gt > args.min_depth_eval) * (depth_gt < args.max_depth_eval)
+            valid_mask = valid_mask == 1
             pred_depth_flatten = pred_depth[valid_mask].cpu().numpy()
             depth_gt_flatten = depth_gt[valid_mask].cpu().numpy()
+
+            # Compute Measurement for lateralre
+            lateral_re = torch.clamp(lateral_re, min=args.min_depth_eval, max=args.max_depth_eval)
+            lateral_re_flatten = lateral_re[valid_mask].cpu().numpy()
+
+            # Compute Measurement for intre
+            int_re = torch.clamp(int_re, min=args.min_depth_eval, max=args.max_depth_eval)
+            int_re_flatten = int_re[valid_mask].cpu().numpy()
 
             eval_measures_depth_np = compute_errors(gt=depth_gt_flatten, pred=pred_depth_flatten)
             eval_measures_depth[:9] += torch.tensor(eval_measures_depth_np).cuda(device=gpu)
 
-            eval_measures_lateralre_np = compute_errors(gt=depth_gt_flatten, pred=depth_latrealre_flatten)
-            eval_measures_intre[:9] += torch.tensor(eval_measures_lateralre_np).cuda(device=gpu)
+            eval_measures_lateralre_np = compute_errors(gt=depth_gt_flatten, pred=lateral_re_flatten)
+            eval_measures_lateralre[:9] += torch.tensor(eval_measures_lateralre_np).cuda(device=gpu)
+
+            eval_measures_intre_np = compute_errors(gt=depth_gt_flatten, pred=int_re_flatten)
+            eval_measures_intre[:9] += torch.tensor(eval_measures_intre_np).cuda(device=gpu)
 
             eval_measures_shape[1] += 1
             eval_measures_depth[9] += 1
+            eval_measures_lateralre[9] += 1
             eval_measures_intre[9] += 1
 
     if args.multiprocessing_distributed:
         group = dist.new_group([i for i in range(ngpus)])
         dist.all_reduce(tensor=eval_measures_shape, op=dist.ReduceOp.SUM, group=group)
         dist.all_reduce(tensor=eval_measures_depth, op=dist.ReduceOp.SUM, group=group)
+        dist.all_reduce(tensor=eval_measures_lateralre, op=dist.ReduceOp.SUM, group=group)
         dist.all_reduce(tensor=eval_measures_intre, op=dist.ReduceOp.SUM, group=group)
 
     if not args.multiprocessing_distributed or gpu == 0:
         eval_measures_shape[0] = eval_measures_shape[0] / eval_measures_shape[1]
         eval_measures_depth[0:9] = eval_measures_depth[0:9] / eval_measures_depth[9]
+        eval_measures_lateralre[0:9] = eval_measures_lateralre[0:9] / eval_measures_lateralre[9]
         eval_measures_intre[0:9] = eval_measures_intre[0:9] / eval_measures_intre[9]
         eval_measures_shape = eval_measures_shape.cpu().numpy()
         eval_measures_depth = eval_measures_depth.cpu().numpy()
+        eval_measures_lateralre = eval_measures_lateralre.cpu().numpy()
         eval_measures_intre = eval_measures_intre.cpu().numpy()
         print('Computing Shape errors for {} eval samples'.format(int(eval_measures_shape[-1])))
         print('L1 Shape Measurement: %f' % (eval_measures_shape[0]))
 
         print('Computing Depth errors for {} eval samples'.format(int(eval_measures_depth[-1])))
-        print("{:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>9}, {:>9}, {:>9}".format('silog', 'abs_rel', 'log10', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3'))
+        print("{:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}".format('silog', 'abs_rel', 'log10', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3'))
         for i in range(8):
-            if i >= 6:
-                print('{:7.9f}, '.format(eval_measures_depth[i]), end='')
-            else:
-                print('{:7.3f}, '.format(eval_measures_depth[i]), end='')
-        print('{:7.9f}'.format(eval_measures_depth[8]))
+            print('{:9.5f}, '.format(eval_measures_depth[i]), end='')
+        print('{:9.5f}'.format(eval_measures_depth[8]))
 
-        print('Computing IntegratedReDepth errors for {} eval samples'.format(int(eval_measures_intre[-1])))
-        print("{:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>9}, {:>9}, {:>9}".format('silog', 'abs_rel', 'log10', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3'))
+        print('Computing Lateral Depth errors for {} eval samples'.format(int(eval_measures_lateralre[-1])))
+        print("{:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}".format('silog', 'abs_rel', 'log10', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3'))
         for i in range(8):
-            if i >= 6:
-                print('{:7.9f}, '.format(eval_measures_intre[i]), end='')
-            else:
-                print('{:7.3f}, '.format(eval_measures_intre[i]), end='')
-        print('{:7.9f}'.format(eval_measures_intre[8]))
-        return eval_measures_shape, eval_measures_depth, eval_measures_intre
+            print('{:9.5f}, '.format(eval_measures_lateralre[i]), end='')
+        print('{:9.5f}'.format(eval_measures_lateralre[8]))
+
+        print('Computing Int Depth errors for {} eval samples'.format(int(eval_measures_intre[-1])))
+        print("{:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}".format('silog', 'abs_rel', 'log10', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3'))
+        for i in range(8):
+            print('{:9.5f}, '.format(eval_measures_intre[i]), end='')
+        print('{:9.5f}'.format(eval_measures_intre[8]))
+        return eval_measures_shape, eval_measures_depth, eval_measures_lateralre, eval_measures_intre
     return None
 
-def compute_shape_loss(normoptizer, outputs, intrinsic, depth_gt):
-    loss, _, _, _, _ = normoptizer.intergrationloss_ang(ang=outputs[('shape', 0)], intrinsic=intrinsic, depthMap=depth_gt)
+def compute_shape_loss(normoptizer, pred_shape, intrinsic, depth_gt):
+    loss, _, _, _, _ = normoptizer.intergrationloss_ang(ang=pred_shape, intrinsic=intrinsic, depthMap=depth_gt)
     return loss
 
-def compute_depth_loss(outputs, depth_gt):
-    loss = 0
-    _, _, h, w = depth_gt.shape
+def compute_depth_loss(pred_depth, depth_gt):
     selector = (depth_gt > 0).float()
-    for k in range(4):
-        outputs[('depth', k)] = F.interpolate(outputs[('depth', k)], [h, w], mode='bilinear', align_corners=False)
-        loss += torch.sum(torch.abs(outputs[('depth', k)] - depth_gt) * selector) / (torch.sum(selector) + 1)
-    loss = loss / 4
+    loss = torch.sum(torch.abs(pred_depth - depth_gt) * selector) / (torch.sum(selector) + 1)
     return loss
 
-def compute_intre(integrater, normoptizer, pred_shape, pred_depth, pred_variance, pred_lambda, intrinsic, depth_gt):
-    pred_log = normoptizer.ang2log(intrinsic=intrinsic, ang=pred_shape)
+def compute_intre(integrater, normoptizer, intrinsic, depth_gt, shape_pred, depth_pred, variance_pred, lambda_pred):
+    pred_log = normoptizer.ang2log(intrinsic=intrinsic, ang=shape_pred)
 
     _, _, h, w = depth_gt.shape
 
     mask = torch.ones_like(depth_gt)
-    singularnorm = normoptizer.ang2edge(ang=pred_shape, intrinsic=intrinsic)
+    singularnorm = normoptizer.ang2edge(ang=shape_pred, intrinsic=intrinsic)
     mask = mask * (1 - singularnorm)
     mask[:, :, 0:100, :] = 0
     mask = mask.int().contiguous()
 
-    lateralre = integrater.compute_lateralre(pred_log=pred_log, mask=mask, variance=pred_variance, depthin=pred_depth)
-    optselector = (lateralre > 0).float()
-    intre = (1 - optselector) * pred_depth + optselector * (pred_depth * (1 - pred_lambda) + lateralre * pred_lambda)
-    return intre, lateralre, mask
+    lateral_re = integrater.compute_lateralre(pred_log=pred_log, mask=mask, variance=variance_pred, depthin=depth_pred)
+    int_re = depth_pred * (1 - lambda_pred) + lateral_re * lambda_pred
+    return int_re, lateral_re, mask
 
-def rename_state_dict(state_dict):
-    new_state_dict = dict()
-    for key in state_dict.keys():
-        if 'module' in key:
-            newkey = '.'.join(key.split('.')[1::])
-            new_state_dict[newkey] = state_dict[key]
-    return new_state_dict
-
-def get_w(start_step, end_step, step):
-    if step < start_step:
-        w = 0
-    elif step > end_step:
-        w = 1
-    else:
-        w = (step - start_step) / (end_step - start_step)
-    return w
+def compute_int_loss(integrater, normoptizer, intrinsic, depth_gt, shape_pred, depth_pred, variance_pred, lambda_pred):
+    gtselector = (depth_gt > 0).float()
+    int_re, lateral_re, mask = compute_intre(integrater, normoptizer, intrinsic, depth_gt, shape_pred, depth_pred, variance_pred, lambda_pred)
+    loss_lateral = torch.sum(torch.abs(lateral_re - depth_gt) * gtselector) / (torch.sum(gtselector) + 1)
+    loss_int = torch.sum(torch.abs(int_re - depth_gt) * gtselector) / (torch.sum(gtselector) + 1)
+    return loss_lateral, loss_int
 
 def main_worker(gpu, ngpus_per_node, args):
     args.gpu = gpu
@@ -302,18 +290,8 @@ def main_worker(gpu, ngpus_per_node, args):
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
 
     # Create model
-    model = IntNet(args)
+    model = SDNet(args)
     model.train()
-
-    depthmodel = DepthNet(args)
-    depthmodel.load_state_dict(rename_state_dict(torch.load(args.depth_checkpoint_path)['model']))
-    depthmodel.cuda()
-    depthmodel.eval()
-
-    shapemodel = ShapeNet()
-    shapemodel.load_state_dict(rename_state_dict(torch.load(args.shape_checkpoint_path)['model']))
-    shapemodel.cuda()
-    shapemodel.eval()
 
     num_params = sum([np.prod(p.size()) for p in model.parameters()])
     print("Total number of parameters: {}".format(num_params))
@@ -364,7 +342,7 @@ def main_worker(gpu, ngpus_per_node, args):
     measurements = ['ShapeL1', 'DepthAbsrel', 'DepthA1']
 
     # Training parameters
-    optimizer = torch.optim.Adam(list(model.module.encoder.parameters()) + list(model.module.decoder.parameters()), lr=args.learning_rate)
+    optimizer = torch.optim.Adam(list(model.module.shape_encoder.parameters()) + list(model.module.shape_decoder.parameters()) + list(model.module.depth_encoder.parameters()) + list(model.module.depth_decoder.parameters()), lr=args.learning_rate)
     model_lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.scheduler_step_size, 0.1)
     model_just_loaded = False
     if args.checkpoint_path != '':
@@ -401,7 +379,8 @@ def main_worker(gpu, ngpus_per_node, args):
     if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
         writer = SummaryWriter(os.path.join(args.log_directory, args.model_name, 'summaries'), flush_secs=30)
         eval_summary_writer_Depth = SummaryWriter(os.path.join(args.log_directory, 'eval_Depth', args.model_name), flush_secs=30)
-        eval_summary_writer_Depth_lateralre = SummaryWriter(os.path.join(args.log_directory, 'eval_Depth', "{}_{}".format(args.model_name, 'intre')), flush_secs=30)
+        eval_summary_writer_Depth_intre = SummaryWriter(os.path.join(args.log_directory, 'eval_Depth', "{}_{}".format(args.model_name, 'intre')), flush_secs=30)
+        eval_summary_writer_Depth_lateralre = SummaryWriter(os.path.join(args.log_directory, 'eval_Depth', "{}_{}".format(args.model_name, 'lateralre')), flush_secs=30)
         eval_summary_writer_Shape = SummaryWriter(os.path.join(args.log_directory, 'eval', args.model_name), flush_secs=30)
 
     start_time = time.time()
@@ -429,19 +408,16 @@ def main_worker(gpu, ngpus_per_node, args):
             K = torch.autograd.Variable(sample_batched['K'].cuda(gpu, non_blocking=True))
             depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
 
-            with torch.no_grad():
-                outputs_depth = depthmodel(image)
-                pred_shape = shapemodel(image)
-            outputs_int = model(image)
+            shape_pred, depth_pred, variance_pred, lambda_pred = model(image)
 
-            intre, lateralre, mask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer, pred_shape=pred_shape, pred_depth=outputs_depth['depth', 0], pred_variance=outputs_int[('variance', 0)], pred_lambda=outputs_int[('lambda', 0)], intrinsic=K, depth_gt=depth_gt)
-            gtselector = (depth_gt > 0).float()
+            int_re, lateral_re, mask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer, intrinsic=K, depth_gt=depth_gt, shape_pred=shape_pred, depth_pred=depth_pred, variance_pred=variance_pred, lambda_pred=lambda_pred)
+            shapeloss = compute_shape_loss(normoptizer=normoptizer, pred_shape=shape_pred, intrinsic=K, depth_gt=depth_gt)
+            depthloss = compute_depth_loss(pred_depth=depth_pred, depth_gt=depth_gt)
+            lateralloss = compute_depth_loss(pred_depth=lateral_re, depth_gt=depth_gt)
+            intloss = compute_depth_loss(pred_depth=int_re, depth_gt=depth_gt)
 
-            w = get_w(start_step=steps_per_epoch * args.startepoch, end_step=steps_per_epoch * args.endepoch, step=global_step)
+            loss = shapeloss + depthloss + lateralloss * args.laterallossw + intloss * args.intlossw
 
-            loss_int = torch.sum(torch.abs(intre - depth_gt) * gtselector) / (torch.sum(gtselector) + 1)
-            loss_lateral = torch.sum(torch.abs(lateralre - depth_gt) * gtselector) / (torch.sum(gtselector) + 1)
-            loss = loss_int * args.intrew * w + loss_lateral
             loss.backward()
             optimizer.step()
 
@@ -463,6 +439,10 @@ def main_worker(gpu, ngpus_per_node, args):
                 print(print_string.format(args.gpu, examples_per_sec, loss, time_sofar, training_time_left))
 
                 if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
+                    writer.add_scalar('shapeloss', shapeloss, global_step)
+                    writer.add_scalar('depthloss', depthloss, global_step)
+                    writer.add_scalar('lateralloss', lateralloss, global_step)
+                    writer.add_scalar('intlossw', intloss, global_step)
                     writer.add_scalar('totloss', loss, global_step)
 
                     minang = - np.pi / 3 * 2
@@ -474,16 +454,18 @@ def main_worker(gpu, ngpus_per_node, args):
                     fig_gt = tensor2disp_circ(1 / depth_gtvls, vmax=0.15, viewind=viewind)
                     fig_rgb = tensor2rgb(sample_batched['image'], viewind=viewind)
 
+                    pred_shape = shape_pred
                     fig_angh = tensor2disp(pred_shape[:, 0].unsqueeze(1) - minang, vmax=maxang, viewind=viewind)
                     fig_angv = tensor2disp(pred_shape[:, 1].unsqueeze(1) - minang, vmax=maxang, viewind=viewind)
 
-                    pred_depth = outputs_depth[('depth', 0)]
+                    pred_depth = depth_pred
                     fig_depth = tensor2disp(1/pred_depth, vmax=0.15, viewind=viewind)
 
-                    fig_lateralre = tensor2disp(1 / intre, vmax=0.15, viewind=viewind)
-                    fig_variance = tensor2disp(outputs_int[('variance', 0)], vmax=(args.clipvariance + 1), viewind=viewind)
+                    pred_lateralre = lateral_re
+                    fig_lateralre = tensor2disp(1 / pred_lateralre, vmax=0.15, viewind=viewind)
+                    fig_variance = tensor2disp(variance_pred, vmax=(args.clipvariance + 1), viewind=viewind)
                     fig_intmask = tensor2disp(mask, vmax=1, viewind=viewind)
-                    fig_lambda = tensor2disp(outputs_int[('lambda', 0)], vmax=1, viewind=viewind)
+                    fig_lambda = tensor2disp(lambda_pred, vmax=1, viewind=viewind)
 
                     fignorm = normoptizer.ang2normal(ang=pred_shape, intrinsic=K)
                     fignorm = np.array(tensor2rgb((fignorm + 1) / 2, viewind=viewind, isnormed=False))
@@ -509,52 +491,58 @@ def main_worker(gpu, ngpus_per_node, args):
             if args.do_online_eval and global_step and global_step % args.eval_freq == 0 and not model_just_loaded:
                 time.sleep(0.1)
                 model.eval()
-                eval_measures_shape, eval_measures_depth, eval_measures_intre = online_eval(shapemodel=shapemodel, depthmodel=depthmodel, intmodel=model, normoptizer_eval=normoptizer_eval, crfIntegrater=crfIntegrater, dataloader_eval=dataloader_eval, gpu=gpu, ngpus=ngpus_per_node)
-                eval_summary_writer_Shape.add_scalar('L1Measure', eval_measures_shape[0], int(global_step))
-                eval_summary_writer_Depth.add_scalar('Depth_absrel', eval_measures_depth[1], int(global_step))
-                eval_summary_writer_Depth.add_scalar('Depth_a1', eval_measures_depth[6], int(global_step))
-                eval_summary_writer_Depth_lateralre.add_scalar('Depth_absrel', eval_measures_intre[1], int(global_step))
-                eval_summary_writer_Depth_lateralre.add_scalar('Depth_a1', eval_measures_intre[6], int(global_step))
+                eval_measures_shape, eval_measures_depth, eval_measures_lateralre, eval_measures_intre = online_eval(model=model, normoptizer_eval=normoptizer_eval, crfIntegrater=crfIntegrater, dataloader_eval=dataloader_eval, gpu=gpu, ngpus=ngpus_per_node)
+                eval_summary_writer_Shape.add_scalar('L1Measure_semidense', eval_measures_shape[0], int(global_step))
+                eval_summary_writer_Depth.add_scalar('Depth_absrel_semidense', eval_measures_depth[1], int(global_step))
+                eval_summary_writer_Depth.add_scalar('Depth_a1_semidense', eval_measures_depth[6], int(global_step))
+                eval_summary_writer_Depth_lateralre.add_scalar('Depth_absrel_semidense', eval_measures_lateralre[1], int(global_step))
+                eval_summary_writer_Depth_lateralre.add_scalar('Depth_a1_semidense', eval_measures_lateralre[6], int(global_step))
+                eval_summary_writer_Depth_intre.add_scalar('Depth_absrel_semidense', eval_measures_intre[1], int(global_step))
+                eval_summary_writer_Depth_intre.add_scalar('Depth_a1_semidense', eval_measures_intre[6], int(global_step))
 
-                for kk in range(best_measures.shape[0]):
-                    is_best = False
-                    if kk == 0 and eval_measures_shape[0] < best_measures[kk]:
-                        old_best_measure = best_measures[kk]
-                        old_best_step = best_steps[kk]
-                        best_measures[kk] = eval_measures_shape[0]
-                        best_steps[kk] = global_step
-                        is_best = True
-                    elif kk == 1 and eval_measures_intre[1] < best_measures[kk]:
-                        old_best_measure = best_measures[kk]
-                        old_best_step = best_steps[kk]
-                        best_measures[kk] = eval_measures_depth[1]
-                        best_steps[kk] = global_step
-                        is_best = True
-                    elif kk == 2 and eval_measures_intre[6] > best_measures[kk]:
-                        old_best_measure = best_measures[kk]
-                        old_best_step = best_steps[kk]
-                        best_measures[kk] = eval_measures_depth[6]
-                        best_steps[kk] = global_step
-                        is_best = True
+                best_depth_measure_cat = np.stack([eval_measures_depth, eval_measures_lateralre, eval_measures_intre], axis=1)
+                best_depth_measure = np.concatenate([np.min(best_depth_measure_cat[0:6, :], axis=1), np.max(best_depth_measure_cat[6::, :], axis=1)], axis=0)
 
-                    if is_best:
-                        old_best_name = 'model-{}-best_{}_{:.5f}'.format(old_best_step, measurements[kk], old_best_measure)
-                        model_path = os.path.join(args.log_directory, args.model_name, old_best_name)
-                        if os.path.exists(model_path):
-                            command = 'rm {}'.format(model_path)
-                            os.system(command)
-                        model_save_name = 'model-{}-best_{}_{:.5f}'.format(best_steps[kk], measurements[kk], best_measures[kk])
-                        print('New best for {}. Saving model: {}'.format(measurements[kk], model_save_name))
-                        checkpoint = {'global_step': global_step,
-                                      'model': model.state_dict(),
-                                      'optimizer': optimizer.state_dict(),
-                                      'best_measures': best_measures,
-                                      'best_steps': best_steps
-                                      }
-                        torch.save(checkpoint, os.path.join(args.log_directory, args.model_name, model_save_name))
-                    if version_num > 1100000000:
-                        eval_summary_writer_Shape.flush()
-                        eval_summary_writer_Depth.flush()
+                if epoch >= 10:
+                    for kk in range(best_measures.shape[0]):
+                        is_best = False
+                        if kk == 0 and eval_measures_shape[0] < best_measures[kk]:
+                            old_best_measure = best_measures[kk]
+                            old_best_step = best_steps[kk]
+                            best_measures[kk] = eval_measures_shape[0]
+                            best_steps[kk] = global_step
+                            is_best = True
+                        elif kk == 1 and best_depth_measure[1] < best_measures[kk]:
+                            old_best_measure = best_measures[kk]
+                            old_best_step = best_steps[kk]
+                            best_measures[kk] = best_depth_measure[1]
+                            best_steps[kk] = global_step
+                            is_best = True
+                        elif kk == 2 and best_depth_measure[6] > best_measures[kk]:
+                            old_best_measure = best_measures[kk]
+                            old_best_step = best_steps[kk]
+                            best_measures[kk] = best_depth_measure[6]
+                            best_steps[kk] = global_step
+                            is_best = True
+
+                        if is_best:
+                            old_best_name = 'model-{}-best_{}_{:.5f}'.format(old_best_step, measurements[kk], old_best_measure)
+                            model_path = os.path.join(args.log_directory, args.model_name, old_best_name)
+                            if os.path.exists(model_path):
+                                command = 'rm {}'.format(model_path)
+                                os.system(command)
+                            model_save_name = 'model-{}-best_{}_{:.5f}'.format(best_steps[kk], measurements[kk], best_measures[kk])
+                            print('New best for {}. Saving model: {}'.format(measurements[kk], model_save_name))
+                            checkpoint = {'global_step': global_step,
+                                          'model': model.state_dict(),
+                                          'optimizer': optimizer.state_dict(),
+                                          'best_measures': best_measures,
+                                          'best_steps': best_steps
+                                          }
+                            torch.save(checkpoint, os.path.join(args.log_directory, args.model_name, model_save_name))
+                        if version_num > 1100000000:
+                            eval_summary_writer_Shape.flush()
+                            eval_summary_writer_Depth.flush()
                 print("Best Shape L1: %f, at step %d" % (best_measures[0], best_steps[0]))
                 print("Best Depth abserl: %f, at step %d" % (best_measures[1], best_steps[1]))
                 print("Best Depth a1: %f, at step %d" % (best_measures[2], best_steps[2]))
