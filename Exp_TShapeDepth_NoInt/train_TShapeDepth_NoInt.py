@@ -265,15 +265,11 @@ def main_worker(gpu, ngpus_per_node, args):
         normoptizer_eval = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=1, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
         normoptizer.to(f'cuda:{args.gpu}')
         normoptizer_eval.to(f'cuda:{args.gpu}')
-        crfIntegrater = CRFIntegrationModule(clipvariance=args.clipvariance, maxrange=args.maxrange)
-        crfIntegrater.to(f'cuda:{args.gpu}')
     else:
         normoptizer = SurfaceNormalOptimizer(height=args.input_height, width=args.input_width, batch_size=int(args.batch_size), angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
         normoptizer_eval = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=1, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
         normoptizer = normoptizer.cuda()
         normoptizer_eval = normoptizer_eval.cuda()
-        crfIntegrater = CRFIntegrationModule(clipvariance=args.clipvariance, maxrange=args.maxrange)
-        crfIntegrater = crfIntegrater.cuda()
 
     if args.distributed:
         if args.gpu is not None:
