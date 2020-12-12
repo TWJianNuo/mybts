@@ -28,8 +28,8 @@ import matplotlib
 import matplotlib.cm
 from tqdm import tqdm
 
-from Exp_TShapeDepth_baseline.shapedataset import KittiShapeDataLoader, KittiShapeDataset
-from Exp_TShapeDepth_baseline.SDNet import SDNet
+from Exp_TShapeDepth_NoInt.shapedataset import KittiShapeDataLoader, KittiShapeDataset
+from Exp_TShapeDepth_NoInt.SDNet import SDNet
 from util import *
 from torchvision import transforms
 import torch.utils.data.distributed
@@ -157,11 +157,9 @@ def block_print():
 def enable_print():
     sys.stdout = sys.__stdout__
 
-def online_eval(model, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, ngpus):
+def online_eval(model, normoptizer_eval, dataloader_eval, gpu, ngpus):
     eval_measures_shape = torch.zeros(2).cuda(device=gpu)
     eval_measures_depth = torch.zeros(10).cuda(device=gpu)
-    eval_measures_lateralre = torch.zeros(10).cuda(device=gpu)
-    eval_measures_intre = torch.zeros(10).cuda(device=gpu)
     for _, eval_sample_batched in enumerate(tqdm(dataloader_eval.data)):
         with torch.no_grad():
             if 'depth' not in eval_sample_batched:
@@ -170,7 +168,6 @@ def online_eval(model, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, ng
             K = torch.autograd.Variable(eval_sample_batched['K'].cuda(gpu, non_blocking=True))
             depth_gt = torch.autograd.Variable(eval_sample_batched['depth'].cuda(args.gpu, non_blocking=True))
             shape_pred, depth_pred, variance_pred, lambda_pred = model(image)
-            int_re, lateral_re, mask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer_eval, intrinsic=K, depth_gt=depth_gt, shape_pred=shape_pred, depth_pred=depth_pred, variance_pred=variance_pred, lambda_pred=lambda_pred)
 
             # Compute Measurement for Shape
             loss_shape = normoptizer_eval.intergrationloss_ang_validation(ang=shape_pred, intrinsic=K, depthMap=depth_gt)
@@ -184,44 +181,22 @@ def online_eval(model, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, ng
             pred_depth_flatten = pred_depth[valid_mask].cpu().numpy()
             depth_gt_flatten = depth_gt[valid_mask].cpu().numpy()
 
-            # Compute Measurement for lateralre
-            lateral_re = torch.clamp(lateral_re, min=args.min_depth_eval, max=args.max_depth_eval)
-            lateral_re_flatten = lateral_re[valid_mask].cpu().numpy()
-
-            # Compute Measurement for intre
-            int_re = torch.clamp(int_re, min=args.min_depth_eval, max=args.max_depth_eval)
-            int_re_flatten = int_re[valid_mask].cpu().numpy()
-
             eval_measures_depth_np = compute_errors(gt=depth_gt_flatten, pred=pred_depth_flatten)
             eval_measures_depth[:9] += torch.tensor(eval_measures_depth_np).cuda(device=gpu)
 
-            eval_measures_lateralre_np = compute_errors(gt=depth_gt_flatten, pred=lateral_re_flatten)
-            eval_measures_lateralre[:9] += torch.tensor(eval_measures_lateralre_np).cuda(device=gpu)
-
-            eval_measures_intre_np = compute_errors(gt=depth_gt_flatten, pred=int_re_flatten)
-            eval_measures_intre[:9] += torch.tensor(eval_measures_intre_np).cuda(device=gpu)
-
             eval_measures_shape[1] += 1
             eval_measures_depth[9] += 1
-            eval_measures_lateralre[9] += 1
-            eval_measures_intre[9] += 1
 
     if args.multiprocessing_distributed:
         group = dist.new_group([i for i in range(ngpus)])
         dist.all_reduce(tensor=eval_measures_shape, op=dist.ReduceOp.SUM, group=group)
         dist.all_reduce(tensor=eval_measures_depth, op=dist.ReduceOp.SUM, group=group)
-        dist.all_reduce(tensor=eval_measures_lateralre, op=dist.ReduceOp.SUM, group=group)
-        dist.all_reduce(tensor=eval_measures_intre, op=dist.ReduceOp.SUM, group=group)
 
     if not args.multiprocessing_distributed or gpu == 0:
         eval_measures_shape[0] = eval_measures_shape[0] / eval_measures_shape[1]
         eval_measures_depth[0:9] = eval_measures_depth[0:9] / eval_measures_depth[9]
-        eval_measures_lateralre[0:9] = eval_measures_lateralre[0:9] / eval_measures_lateralre[9]
-        eval_measures_intre[0:9] = eval_measures_intre[0:9] / eval_measures_intre[9]
         eval_measures_shape = eval_measures_shape.cpu().numpy()
         eval_measures_depth = eval_measures_depth.cpu().numpy()
-        eval_measures_lateralre = eval_measures_lateralre.cpu().numpy()
-        eval_measures_intre = eval_measures_intre.cpu().numpy()
         print('Computing Shape errors for {} eval samples'.format(int(eval_measures_shape[-1])))
         print('L1 Shape Measurement: %f' % (eval_measures_shape[0]))
 
@@ -230,19 +205,7 @@ def online_eval(model, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, ng
         for i in range(8):
             print('{:9.5f}, '.format(eval_measures_depth[i]), end='')
         print('{:9.5f}'.format(eval_measures_depth[8]))
-
-        print('Computing Lateral Depth errors for {} eval samples'.format(int(eval_measures_lateralre[-1])))
-        print("{:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}".format('silog', 'abs_rel', 'log10', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3'))
-        for i in range(8):
-            print('{:9.5f}, '.format(eval_measures_lateralre[i]), end='')
-        print('{:9.5f}'.format(eval_measures_lateralre[8]))
-
-        print('Computing Int Depth errors for {} eval samples'.format(int(eval_measures_intre[-1])))
-        print("{:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}, {:>9}".format('silog', 'abs_rel', 'log10', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3'))
-        for i in range(8):
-            print('{:9.5f}, '.format(eval_measures_intre[i]), end='')
-        print('{:9.5f}'.format(eval_measures_intre[8]))
-        return eval_measures_shape, eval_measures_depth, eval_measures_lateralre, eval_measures_intre
+        return eval_measures_shape, eval_measures_depth
     return None
 
 def compute_shape_loss(normoptizer, pred_shape, intrinsic, depth_gt):
@@ -379,8 +342,6 @@ def main_worker(gpu, ngpus_per_node, args):
     if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
         writer = SummaryWriter(os.path.join(args.log_directory, args.model_name, 'summaries'), flush_secs=30)
         eval_summary_writer_Depth = SummaryWriter(os.path.join(args.log_directory, 'eval_Depth', args.model_name), flush_secs=30)
-        eval_summary_writer_Depth_intre = SummaryWriter(os.path.join(args.log_directory, 'eval_Depth', "{}_{}".format(args.model_name, 'intre')), flush_secs=30)
-        eval_summary_writer_Depth_lateralre = SummaryWriter(os.path.join(args.log_directory, 'eval_Depth', "{}_{}".format(args.model_name, 'lateralre')), flush_secs=30)
         eval_summary_writer_Shape = SummaryWriter(os.path.join(args.log_directory, 'eval', args.model_name), flush_secs=30)
 
     start_time = time.time()
@@ -410,13 +371,10 @@ def main_worker(gpu, ngpus_per_node, args):
 
             shape_pred, depth_pred, variance_pred, lambda_pred = model(image)
 
-            int_re, lateral_re, mask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer, intrinsic=K, depth_gt=depth_gt, shape_pred=shape_pred, depth_pred=depth_pred, variance_pred=variance_pred, lambda_pred=lambda_pred)
             shapeloss = compute_shape_loss(normoptizer=normoptizer, pred_shape=shape_pred, intrinsic=K, depth_gt=depth_gt)
             depthloss = compute_depth_loss(pred_depth=depth_pred, depth_gt=depth_gt)
-            lateralloss = compute_depth_loss(pred_depth=lateral_re, depth_gt=depth_gt)
-            intloss = compute_depth_loss(pred_depth=int_re, depth_gt=depth_gt)
 
-            loss = shapeloss + (depthloss + lateralloss * args.laterallossw + intloss * args.intlossw) * args.depthlossw / (1 + args.laterallossw + args.intlossw)
+            loss = shapeloss + depthloss
 
             loss.backward()
             optimizer.step()
@@ -441,8 +399,6 @@ def main_worker(gpu, ngpus_per_node, args):
                 if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
                     writer.add_scalar('shapeloss', shapeloss, global_step)
                     writer.add_scalar('depthloss', depthloss, global_step)
-                    writer.add_scalar('lateralloss', lateralloss, global_step)
-                    writer.add_scalar('intlossw', intloss, global_step)
                     writer.add_scalar('totloss', loss, global_step)
 
                     minang = - np.pi / 3 * 2
@@ -461,21 +417,13 @@ def main_worker(gpu, ngpus_per_node, args):
                     pred_depth = depth_pred
                     fig_depth = tensor2disp(1/pred_depth, vmax=0.15, viewind=viewind)
 
-                    pred_lateralre = lateral_re
-                    fig_lateralre = tensor2disp(1 / pred_lateralre, vmax=0.15, viewind=viewind)
-                    fig_variance = tensor2disp(variance_pred, vmax=(args.clipvariance + 1), viewind=viewind)
-                    fig_intmask = tensor2disp(mask, vmax=1, viewind=viewind)
-                    fig_lambda = tensor2disp(lambda_pred, vmax=1, viewind=viewind)
-
                     fignorm = normoptizer.ang2normal(ang=pred_shape, intrinsic=K)
                     fignorm = np.array(tensor2rgb((fignorm + 1) / 2, viewind=viewind, isnormed=False))
 
                     figoveiewu = np.concatenate([np.array(fig_rgb), np.array(fig_gt)], axis=1)
                     figoveiewd = np.concatenate([np.array(fig_angh), np.array(fig_angv)], axis=1)
                     figoveiewdd = np.concatenate([np.array(fig_depth), np.array(fignorm)], axis=1)
-                    figoveiewddd = np.concatenate([np.array(fig_lateralre), np.array(fig_variance)], axis=1)
-                    figoveiewdddd = np.concatenate([np.array(fig_intmask), np.array(fig_lambda)], axis=1)
-                    figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd, figoveiewddd, figoveiewdddd], axis=0)
+                    figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd], axis=0)
 
                     writer.add_image('oview', (torch.from_numpy(figoveiew).float() / 255).permute([2, 0, 1]), global_step)
                     if version_num > 1100000000:
@@ -491,17 +439,10 @@ def main_worker(gpu, ngpus_per_node, args):
             if args.do_online_eval and global_step and global_step % args.eval_freq == 0 and not model_just_loaded:
                 time.sleep(0.1)
                 model.eval()
-                eval_measures_shape, eval_measures_depth, eval_measures_lateralre, eval_measures_intre = online_eval(model=model, normoptizer_eval=normoptizer_eval, crfIntegrater=crfIntegrater, dataloader_eval=dataloader_eval, gpu=gpu, ngpus=ngpus_per_node)
+                eval_measures_shape, eval_measures_depth = online_eval(model=model, normoptizer_eval=normoptizer_eval, crfIntegrater=crfIntegrater, dataloader_eval=dataloader_eval, gpu=gpu, ngpus=ngpus_per_node)
                 eval_summary_writer_Shape.add_scalar('L1Measure_semidense', eval_measures_shape[0], int(global_step))
                 eval_summary_writer_Depth.add_scalar('Depth_absrel_semidense', eval_measures_depth[1], int(global_step))
                 eval_summary_writer_Depth.add_scalar('Depth_a1_semidense', eval_measures_depth[6], int(global_step))
-                eval_summary_writer_Depth_lateralre.add_scalar('Depth_absrel_semidense', eval_measures_lateralre[1], int(global_step))
-                eval_summary_writer_Depth_lateralre.add_scalar('Depth_a1_semidense', eval_measures_lateralre[6], int(global_step))
-                eval_summary_writer_Depth_intre.add_scalar('Depth_absrel_semidense', eval_measures_intre[1], int(global_step))
-                eval_summary_writer_Depth_intre.add_scalar('Depth_a1_semidense', eval_measures_intre[6], int(global_step))
-
-                best_depth_measure_cat = np.stack([eval_measures_depth, eval_measures_lateralre, eval_measures_intre], axis=1)
-                best_depth_measure = np.concatenate([np.min(best_depth_measure_cat[0:6, :], axis=1), np.max(best_depth_measure_cat[6::, :], axis=1)], axis=0)
 
                 if epoch >= 10:
                     for kk in range(best_measures.shape[0]):
@@ -512,16 +453,16 @@ def main_worker(gpu, ngpus_per_node, args):
                             best_measures[kk] = eval_measures_shape[0]
                             best_steps[kk] = global_step
                             is_best = True
-                        elif kk == 1 and best_depth_measure[1] < best_measures[kk]:
+                        elif kk == 1 and eval_measures_depth[1] < best_measures[kk]:
                             old_best_measure = best_measures[kk]
                             old_best_step = best_steps[kk]
-                            best_measures[kk] = best_depth_measure[1]
+                            best_measures[kk] = eval_measures_depth[1]
                             best_steps[kk] = global_step
                             is_best = True
-                        elif kk == 2 and best_depth_measure[6] > best_measures[kk]:
+                        elif kk == 2 and eval_measures_depth[6] > best_measures[kk]:
                             old_best_measure = best_measures[kk]
                             old_best_step = best_steps[kk]
-                            best_measures[kk] = best_depth_measure[6]
+                            best_measures[kk] = eval_measures_depth[6]
                             best_steps[kk] = global_step
                             is_best = True
 
