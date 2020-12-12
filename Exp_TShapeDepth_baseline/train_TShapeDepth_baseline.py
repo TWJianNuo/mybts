@@ -87,6 +87,7 @@ parser.add_argument('--min_depth',                 type=float, help="min depth v
 parser.add_argument('--max_depth',                 type=float, help="max depth value", default=100)
 parser.add_argument('--laterallossw',              type=float, help="mounted to depth loss", default=1)
 parser.add_argument('--intlossw',                  type=float, help="mounted to depth loss", default=1)
+parser.add_argument('--depthlossw',                type=float, help="mounted to depth loss", default=1e-2)
 
 parser.add_argument("--inttimes",               type=int,     default=1)
 parser.add_argument("--clipvariance",           type=float,   default=5)
@@ -415,7 +416,7 @@ def main_worker(gpu, ngpus_per_node, args):
             lateralloss = compute_depth_loss(pred_depth=lateral_re, depth_gt=depth_gt)
             intloss = compute_depth_loss(pred_depth=int_re, depth_gt=depth_gt)
 
-            loss = shapeloss + depthloss + lateralloss * args.laterallossw + intloss * args.intlossw
+            loss = shapeloss + (depthloss + lateralloss * args.laterallossw + intloss * args.intlossw) * args.depthlossw
 
             loss.backward()
             optimizer.step()
