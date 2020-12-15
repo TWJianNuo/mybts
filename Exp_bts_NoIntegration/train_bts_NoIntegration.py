@@ -37,7 +37,7 @@ import threading
 from tqdm import tqdm
 
 from Exp_bts_NoIntegration.btsnet import BtsSDModel
-from bts_dataloader import *
+from Exp_bts_NoIntegration.bts_dataloader import BtsDataLoader
 from integrationModule import CRFIntegrationModule
 from util import *
 
@@ -152,11 +152,6 @@ elif args.mode == 'train' and args.checkpoint_path:
         if key.startswith('__') and key.endswith('__'):
             continue
         vars()[key] = val
-
-inv_normalize = transforms.Normalize(
-    mean=[-0.485/0.229, -0.456/0.224, -0.406/0.225],
-    std=[1/0.229, 1/0.224, 1/0.225]
-)
 
 eval_metrics = ['silog', 'abs_rel', 'log10', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3']
 
