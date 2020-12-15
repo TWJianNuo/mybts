@@ -19,6 +19,7 @@ import argparse
 import datetime
 import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__))) # location of src
 
 import torch
 import torch.nn as nn
