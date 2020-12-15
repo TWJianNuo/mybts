@@ -24,12 +24,11 @@ import random
 
 import transforms as T
 from transforms.augmentation import _transform_to_aug
-
 from fvcore.transforms.transform import CropTransform
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from distributed_sampler_no_evenly_divisible import *
 
-ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 def _is_pil_image(img):
     return isinstance(img, Image.Image)

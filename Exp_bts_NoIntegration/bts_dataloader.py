@@ -193,17 +193,6 @@ class KittiDataset(Dataset):
         result = image.rotate(angle, resample=flag)
         return result
 
-    def do_random_crop(self, img, depth, height, width):
-        assert img.shape[0] >= height
-        assert img.shape[1] >= width
-        assert img.shape[0] == depth.shape[0]
-        assert img.shape[1] == depth.shape[1]
-        x = random.randint(0, img.shape[1] - width)
-        y = random.randint(0, img.shape[0] - height)
-        img = img[y:y + height, x:x + width, :]
-        depth = depth[y:y + height, x:x + width, :]
-        return img, depth
-
     def do_random_coloraug(self, image):
         image = image.astype(np.float32) / 255.0
         if random.random() > 0.5:
