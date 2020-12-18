@@ -36,8 +36,8 @@ import matplotlib.cm
 import threading
 from tqdm import tqdm
 
-from Exp_bts_NoIntegration.btsnet import BtsSDModel
-from Exp_bts_NoIntegration.bts_dataloader import BtsDataLoader
+from Exp_bts_Integration.btsnet import BtsSDModel
+from Exp_bts_Integration.bts_dataloader import BtsDataLoader
 from integrationModule import CRFIntegrationModule
 from util import *
 
@@ -90,6 +90,7 @@ parser.add_argument('--adam_eps',                  type=float, help='epsilon in 
 parser.add_argument('--batch_size',                type=int,   help='batch size', default=4)
 parser.add_argument('--num_epochs',                type=int,   help='number of epochs', default=50)
 parser.add_argument('--learning_rate',             type=float, help='initial learning rate', default=1e-4)
+parser.add_argument('--learning_rate_shape',             type=float, help='initial learning rate', default=1e-4)
 parser.add_argument('--end_learning_rate',         type=float, help='end learning rate', default=-1)
 parser.add_argument('--variance_focus',            type=float, help='lambda in paper: [0, 1], higher value more focus on minimizing variance of error', default=0.85)
 parser.add_argument('--depthlossw',                type=float, help="mounted to depth loss", default=1e-2)
@@ -418,9 +419,9 @@ def main_worker(gpu, ngpus_per_node, args):
     best_measures[2] = 0
 
     # Training parameters
-    optimizer_depth = torch.optim.AdamW([{'params': model.module.depth_encoder.parameters(), 'weight_decay': args.weight_decay}, {'params': model.module.depth_decoder.parameters(), 'weight_decay': 0}], lr=args.learning_rate, eps=args.adam_eps)
-    optimizer_shape = torch.optim.Adam(list(model.module.shape_encoder.parameters()) + list(model.module.shape_decoder.parameters()), lr=args.learning_rate)
-    optimizer_shape_scheduler = torch.optim.lr_scheduler.StepLR(optimizer_shape, args.scheduler_step_size, 0.1)
+    optimizer = torch.optim.AdamW([{'params': model.module.depth_encoder.parameters(), 'weight_decay': args.weight_decay, 'lr': args.learning_rate, 'eps': args.adam_eps},
+                                   {'params': model.module.depth_decoder.parameters(), 'weight_decay': 0, 'lr': args.learning_rate, 'eps': args.adam_eps},
+                                   {'params': list(model.module.shape_encoder.parameters()) + list(model.module.shape_decoder.parameters()), 'weight_decay': 0, 'lr': args.learning_rate_shape, 'eps': args.adam_eps}])
 
     model_just_loaded = False
     if args.checkpoint_path != '':
@@ -477,8 +478,7 @@ def main_worker(gpu, ngpus_per_node, args):
             dataloader.train_sampler.set_epoch(epoch)
 
         for step, sample_batched in enumerate(dataloader.data):
-            optimizer_depth.zero_grad()
-            optimizer_shape.zero_grad()
+            optimizer.zero_grad()
 
             before_op_time = time.time()
 
@@ -493,15 +493,14 @@ def main_worker(gpu, ngpus_per_node, args):
 
             loss_depth = silog_criterion.forward(outputs['final_depth'], depth_gt, mask.to(torch.bool))
             loss_shape = compute_shape_loss(normoptizer, outputs['pred_shape'], K, depth_gt)
-            loss = loss_depth * args.depthlossw + loss_shape
+            loss = loss_depth + loss_shape
             loss.backward()
 
-            for param_group in optimizer_depth.param_groups:
+            for param_group in optimizer.param_groups:
                 current_lr = (args.learning_rate - end_learning_rate) * (1 - global_step / num_total_steps) ** 0.9 + end_learning_rate
                 param_group['lr'] = current_lr
 
-            optimizer_depth.step()
-            optimizer_shape.step()
+            optimizer.step()
 
             if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
                 print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], lr: {:.12f}, loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, current_lr, loss))
@@ -624,7 +623,6 @@ def main_worker(gpu, ngpus_per_node, args):
             global_step += 1
 
         epoch += 1
-        optimizer_shape_scheduler.step()
 
 def main():
     if args.mode != 'train':
