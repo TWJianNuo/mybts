@@ -148,7 +148,14 @@ class local_planar_guidance(nn.Module):
         v = self.v.repeat(plane_eq.size(0), plane_eq.size(2), plane_eq.size(3) * int(self.upratio)).cuda()
         v = (v - (self.upratio - 1) * 0.5) / self.upratio
 
-        return n4 / (n1 * u + n2 * v + n3)
+        denumerator = n1 * u + n2 * v + n3
+        sign_denumerator = denumerator.sign()
+        denumerator = denumerator.abs().clamp_(min=1e-4, max=np.inf)
+        denumerator = denumerator * sign_denumerator
+
+        pred = n4 / denumerator
+
+        return pred
 
 
 class bts(nn.Module):
