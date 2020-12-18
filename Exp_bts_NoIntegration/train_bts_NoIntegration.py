@@ -36,8 +36,8 @@ import matplotlib.cm
 import threading
 from tqdm import tqdm
 
-from Exp_bts_Integration.btsnet import BtsSDModel
-from Exp_bts_Integration.bts_dataloader import BtsDataLoader
+from Exp_bts_NoIntegration.btsnet import BtsSDModel
+from Exp_bts_NoIntegration.bts_dataloader import BtsDataLoader
 from integrationModule import CRFIntegrationModule
 from util import *
 
@@ -91,9 +91,7 @@ parser.add_argument('--batch_size',                type=int,   help='batch size'
 parser.add_argument('--num_epochs',                type=int,   help='number of epochs', default=50)
 parser.add_argument('--learning_rate',             type=float, help='initial learning rate', default=1e-4)
 parser.add_argument('--learning_rate_shape',             type=float, help='initial learning rate', default=1e-4)
-parser.add_argument('--end_learning_rate',         type=float, help='end learning rate', default=-1)
 parser.add_argument('--variance_focus',            type=float, help='lambda in paper: [0, 1], higher value more focus on minimizing variance of error', default=0.85)
-parser.add_argument('--depthlossw',                type=float, help="mounted to depth loss", default=1e-2)
 
 # Preprocessing
 parser.add_argument('--do_random_rotate',                      help='if set, will perform random rotation for augmentation', action='store_true')
@@ -419,9 +417,9 @@ def main_worker(gpu, ngpus_per_node, args):
     best_measures[2] = 0
 
     # Training parameters
-    optimizer = torch.optim.AdamW([{'params': model.module.depth_encoder.parameters(), 'weight_decay': args.weight_decay, 'lr': args.learning_rate, 'eps': args.adam_eps},
-                                   {'params': model.module.depth_decoder.parameters(), 'weight_decay': 0, 'lr': args.learning_rate, 'eps': args.adam_eps},
-                                   {'params': list(model.module.shape_encoder.parameters()) + list(model.module.shape_decoder.parameters()), 'weight_decay': 0, 'lr': args.learning_rate_shape, 'eps': args.adam_eps}])
+    optimizer = torch.optim.AdamW([{'params': model.module.depth_encoder.parameters(), 'weight_decay': args.weight_decay, 'lr': args.learning_rate, 'eps': args.adam_eps, 'name': 'depth_encoder'},
+                                   {'params': model.module.depth_decoder.parameters(), 'weight_decay': 0, 'lr': args.learning_rate, 'eps': args.adam_eps, 'name': 'depth_decoder'},
+                                   {'params': list(model.module.shape_encoder.parameters()) + list(model.module.shape_decoder.parameters()), 'weight_decay': 0, 'lr': args.learning_rate_shape, 'eps': args.adam_eps, 'name': 'shapenet'}])
 
     model_just_loaded = False
     if args.checkpoint_path != '':
@@ -459,8 +457,6 @@ def main_worker(gpu, ngpus_per_node, args):
     start_time = time.time()
     duration = 0
 
-    end_learning_rate = args.end_learning_rate if args.end_learning_rate != -1 else 0.1 * args.learning_rate
-
     var_sum = [var.sum() for var in model.parameters() if var.requires_grad]
     var_cnt = len(var_sum)
     var_sum = np.sum(var_sum)
@@ -469,6 +465,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     steps_per_epoch = len(dataloader.data)
     num_total_steps = args.num_epochs * steps_per_epoch
+    num_lrmod_steps = (args.num_epochs - 5) * steps_per_epoch
     epoch = global_step // steps_per_epoch
 
     measurements = ['ShapeL1', 'DepthAbsrelGarg', 'DepthA1Garg']
@@ -497,7 +494,10 @@ def main_worker(gpu, ngpus_per_node, args):
             loss.backward()
 
             for param_group in optimizer.param_groups:
-                current_lr = (args.learning_rate - end_learning_rate) * (1 - global_step / num_total_steps) ** 0.9 + end_learning_rate
+                if param_group['name'] != 'shapenet':
+                    current_lr = (args.learning_rate - 0.1 * args.learning_rate) * (1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate
+                else:
+                    current_lr = (args.learning_rate_shape - 0.1 * args.learning_rate_shape) * (1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate_shape
                 param_group['lr'] = current_lr
 
             optimizer.step()
