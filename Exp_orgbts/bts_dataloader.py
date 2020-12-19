@@ -68,12 +68,12 @@ class BtsDataLoader(object):
         if mode == 'train':
             self.training_samples = KittiDataset(args, mode, filenames=readlines(args.filenames_file))
             self.train_sampler = torch.utils.data.distributed.DistributedSampler(self.training_samples) if args.distributed else None
-            self.data = DataLoader(self.training_samples, args.batch_size, shuffle=(self.train_sampler is None), num_workers=args.num_threads, pin_memory=True, sampler=self.train_sampler)
+            self.data = DataLoader(self.training_samples, args.batch_size, shuffle=(self.train_sampler is None), num_workers=args.num_threads, pin_memory=True, sampler=self.train_sampler, drop_last=True)
 
         elif mode == 'online_eval':
             self.testing_samples = KittiDataset(args, mode, filenames=readlines(args.filenames_file_eval))
             self.eval_sampler = DistributedSamplerNoEvenlyDivisible(self.testing_samples, shuffle=False) if args.distributed else None
-            self.data = DataLoader(self.testing_samples, 1, shuffle=False, num_workers=args.num_threads_eval, pin_memory=True, sampler=self.eval_sampler)
+            self.data = DataLoader(self.testing_samples, 1, shuffle=False, num_workers=args.num_threads_eval, pin_memory=True, sampler=self.eval_sampler, drop_last=True)
         else:
             print('mode should be one of \'train, test, online_eval\'. Got {}'.format(mode))
 
