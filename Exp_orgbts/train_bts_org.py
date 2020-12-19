@@ -35,6 +35,7 @@ import matplotlib
 import matplotlib.cm
 import threading
 from tqdm import tqdm
+from util import *
 
 from Exp_orgbts.bts import BtsModeOrg
 from Exp_orgbts.bts_dataloader import BtsDataLoader
@@ -465,15 +466,17 @@ def main_worker(gpu, ngpus_per_node, args):
                     writer.add_scalar('silog_loss', loss, global_step)
                     writer.add_scalar('learning_rate', current_lr, global_step)
                     writer.add_scalar('var average', var_sum.item()/var_cnt, global_step)
-                    depth_gt = torch.where(depth_gt < 1e-3, depth_gt * 0 + 1e3, depth_gt)
-                    for i in range(num_log_images):
-                        writer.add_image('depth_gt/image/{}'.format(i), normalize_result(1/depth_gt[i, :, :, :].data), global_step)
-                        writer.add_image('depth_est/image/{}'.format(i), normalize_result(1/depth_est[i, :, :, :].data), global_step)
-                        writer.add_image('reduc1x1/image/{}'.format(i), normalize_result(1/reduc1x1[i, :, :, :].data), global_step)
-                        writer.add_image('lpg2x2/image/{}'.format(i), normalize_result(1/lpg2x2[i, :, :, :].data), global_step)
-                        writer.add_image('lpg4x4/image/{}'.format(i), normalize_result(1/lpg4x4[i, :, :, :].data), global_step)
-                        writer.add_image('lpg8x8/image/{}'.format(i), normalize_result(1/lpg8x8[i, :, :, :].data), global_step)
-                        writer.add_image('image/image/{}'.format(i), inv_normalize(image[i, :, :, :]).data, global_step)
+
+                    viewind = 0
+                    depth_gtvls = torch.clone(depth_gt)
+                    depth_gtvls[depth_gtvls == 0] = float("Inf")
+                    fig_gt = tensor2disp_circ(1 / depth_gtvls, vmax=0.15, viewind=viewind)
+                    fig_rgb = tensor2rgb(sample_batched['image'], viewind=viewind)
+
+                    fig_depth = tensor2disp(1/depth_est, vmax=0.15, viewind=viewind)
+                    figoveiew = np.concatenate([fig_rgb, fig_gt, fig_depth], axis=0)
+
+                    writer.add_image('oview', (torch.from_numpy(figoveiew).float() / 255).permute([2, 0, 1]), global_step)
                     if version_num > 1100000000:
                         writer.flush()
 
