@@ -36,7 +36,7 @@ import matplotlib.cm
 import threading
 from tqdm import tqdm
 
-from Exp_orgbts.bts import BtsModel
+from Exp_orgbts.bts import BtsModeOrg
 from bts_dataloader import *
 
 version_num = torch.__version__
@@ -326,7 +326,7 @@ def main_worker(gpu, ngpus_per_node, args):
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
 
     # Create model
-    model = BtsModel(args)
+    model = BtsModeOrg(args)
     model.train()
     model.decoder.apply(weights_init_xavier)
     set_misc(model)

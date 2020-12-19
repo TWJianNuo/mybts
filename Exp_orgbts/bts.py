@@ -330,9 +330,9 @@ class encoder(nn.Module):
         return skip_feat
 
 
-class BtsModel(nn.Module):
+class BtsModeOrg(nn.Module):
     def __init__(self, params):
-        super(BtsModel, self).__init__()
+        super(BtsModeOrg, self).__init__()
         self.encoder = encoder(params)
         self.decoder = bts(params, self.encoder.feat_out_channels, params.bts_size)
 
