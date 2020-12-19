@@ -117,8 +117,6 @@ parser.add_argument('--max_depth_eval',            type=float, help='maximum dep
 parser.add_argument('--eigen_crop',                            help='if set, crops according to Eigen NIPS14', action='store_true')
 parser.add_argument('--garg_crop',                             help='if set, crops according to Garg  ECCV16', action='store_true')
 parser.add_argument('--eval_freq',                 type=int,   help='Online evaluation frequency in global steps', default=500)
-parser.add_argument('--eval_summary_directory',    type=str,   help='output directory for eval summary,'
-                                                                    'if empty outputs to checkpoint folder', default='')
 parser.add_argument('--num_threads_eval',          type=int,   default=2)
 
 if sys.argv.__len__() == 2:
