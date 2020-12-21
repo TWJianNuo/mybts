@@ -559,12 +559,13 @@ def main_worker(gpu, ngpus_per_node, args):
             loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw
             loss.backward()
 
-            for param_group in optimizer.param_groups:
-                if param_group['name'] != 'shapenet':
-                    current_lr = (args.learning_rate - 0.1 * args.learning_rate) * (1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate
-                else:
-                    current_lr = (args.learning_rate_shape - 0.1 * args.learning_rate_shape) * (1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate_shape
-                param_group['lr'] = current_lr
+            if global_step / num_lrmod_steps <= 1:
+                for param_group in optimizer.param_groups:
+                    if param_group['name'] != 'shapenet':
+                        current_lr = (args.learning_rate - 0.1 * args.learning_rate) * (1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate
+                    else:
+                        current_lr = (args.learning_rate_shape - 0.1 * args.learning_rate_shape) * (1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate_shape
+                    param_group['lr'] = current_lr
 
             optimizer.step()
 
