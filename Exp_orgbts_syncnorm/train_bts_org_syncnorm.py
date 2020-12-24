@@ -327,7 +327,6 @@ def main_worker(gpu, ngpus_per_node, args):
     model = BtsModeOrg(args)
     model.train()
     model.decoder.apply(weights_init_xavier)
-    set_misc(model)
 
     num_params = sum([np.prod(p.size()) for p in model.parameters()])
     print("Total number of parameters: {}".format(num_params))
@@ -529,7 +528,6 @@ def main_worker(gpu, ngpus_per_node, args):
                         eval_summary_writer.flush()
                 model.train()
                 block_print()
-                set_misc(model)
                 enable_print()
 
             model_just_loaded = False
