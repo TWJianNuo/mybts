@@ -111,6 +111,27 @@ class NaiveSyncBatchNorm(BatchNorm2d):
         self.running_var += momentum * (var.detach() - self.running_var)
         return input * scale + bias
 
+def convert_sync_batchnorm(module):
+    module_output = module
+    if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+        module_output = NaiveSyncBatchNorm(module.num_features,
+                                           module.eps, module.momentum,
+                                           module.affine,
+                                           module.track_running_stats)
+        if module.affine:
+            with torch.no_grad():
+                module_output.weight = module.weight
+                module_output.bias = module.bias
+        module_output.running_mean = module.running_mean
+        module_output.running_var = module.running_var
+        module_output.num_batches_tracked = module.num_batches_tracked
+        if hasattr(module, "qconfig"):
+            module_output.qconfig = module.qconfig
+    for name, child in module.named_children():
+        module_output.add_module(name, convert_sync_batchnorm(module=child))
+    del module
+    return module_output
+
 # This sets the batch norm layers in pytorch as if {'is_training': False, 'scale': True} in tensorflow
 def bn_init_as_tf(m):
     if isinstance(m, nn.BatchNorm2d):
@@ -119,13 +140,11 @@ def bn_init_as_tf(m):
         m.affine = True
         m.requires_grad = True
 
-
 def weights_init_xavier(m):
     if isinstance(m, nn.Conv2d):
         torch.nn.init.xavier_uniform_(m.weight)
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
-
 
 class silog_loss(nn.Module):
     def __init__(self, variance_focus):
@@ -135,7 +154,6 @@ class silog_loss(nn.Module):
     def forward(self, depth_est, depth_gt, mask):
         d = torch.log(depth_est[mask]) - torch.log(depth_gt[mask])
         return torch.sqrt((d ** 2).mean() - self.variance_focus * (d.mean() ** 2)) * 10.0
-
 
 class atrous_conv(nn.Sequential):
     def __init__(self, in_channels, out_channels, dilation, apply_bn_first=True):
@@ -251,7 +269,7 @@ class bts(nn.Module):
         super(bts, self).__init__()
         self.params = params
 
-        normfunc = NaiveSyncBatchNorm
+        normfunc = nn.BatchNorm2d
 
         self.upconv5 = upconv(feat_out_channels[4], num_features)
         self.bn5 = normfunc(num_features, momentum=0.01, affine=True, eps=1.1e-5)

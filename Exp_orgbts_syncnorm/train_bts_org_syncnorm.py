@@ -37,8 +37,8 @@ import threading
 from tqdm import tqdm
 from util import *
 
-from Exp_orgbts_syncnorm_decoder.bts import BtsModeOrg
-from Exp_orgbts_syncnorm_decoder.bts_dataloader import BtsDataLoader
+from Exp_orgbts_syncnorm.bts import BtsModeOrg
+from Exp_orgbts_syncnorm.bts_dataloader import BtsDataLoader
 import numpy as np
 
 version_num = torch.__version__
@@ -48,6 +48,9 @@ if version_num > 1100000000:
     from torch.utils.tensorboard import SummaryWriter
 else:
     from tensorboardX import SummaryWriter
+
+from Exp_orgbts_syncnorm.bts import convert_sync_batchnorm
+
 
 def convert_arg_line_to_args(arg_line):
     for arg in arg_line.split():
@@ -333,6 +336,7 @@ def main_worker(gpu, ngpus_per_node, args):
     print("Total number of learning parameters: {}".format(num_params_update))
 
     if args.distributed:
+        model = convert_sync_batchnorm(module=model)
         if args.gpu is not None:
             torch.cuda.set_device(args.gpu)
             model.cuda(args.gpu)
