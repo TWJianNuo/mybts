@@ -415,7 +415,7 @@ def main_worker(gpu, ngpus_per_node, args):
             args.batch_size = int(args.batch_size / ngpus_per_node)
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
 
-            normoptizer = SurfaceNormalOptimizer(height=args.input_height, width=args.input_width, batch_size=int(args.batch_size / dist.get_world_size()), angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
+            normoptizer = SurfaceNormalOptimizer(height=args.input_height, width=args.input_width, batch_size=args.batch_size, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
             normoptizer_eval = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=1, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
             normoptizer.to(f'cuda:{args.gpu}')
             normoptizer_eval.to(f'cuda:{args.gpu}')
@@ -425,7 +425,7 @@ def main_worker(gpu, ngpus_per_node, args):
             model.cuda()
             model = torch.nn.parallel.DistributedDataParallel(model, find_unused_parameters=True)
 
-            normoptizer = SurfaceNormalOptimizer(height=args.input_height, width=args.input_width, batch_size=int(args.batch_size), angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
+            normoptizer = SurfaceNormalOptimizer(height=args.input_height, width=args.input_width, batch_size=args.batch_size, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
             normoptizer_eval = SurfaceNormalOptimizer(height=kbcroph, width=kbcropw, batch_size=1, angw=args.angw, vlossw=args.vlossw, sclw=args.sclw)
             normoptizer = normoptizer.cuda()
             normoptizer_eval = normoptizer_eval.cuda()

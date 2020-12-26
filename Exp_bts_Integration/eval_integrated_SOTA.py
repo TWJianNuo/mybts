@@ -157,10 +157,7 @@ def online_eval(model, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, vl
             K = torch.autograd.Variable(eval_sample_batched['K'].cuda(args.gpu, non_blocking=True))
 
             outputs = model(image, focal)
-            if idx == 307:
-                a = 1
-            else:
-                continue
+
             pred_depth = pil.open(os.path.join('/media/shengjie/disk1/visualization/btspred/bts_eigen_v2_pytorch_densenet161', str(idx).zfill(6) + '.png'))
             pred_depth = np.array(pred_depth).astype(np.float32) / 256.0
             pred_depth = torch.from_numpy(pred_depth).unsqueeze(0).unsqueeze(0).cuda()
@@ -169,49 +166,49 @@ def online_eval(model, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, vl
             int_re, lateral_re, intmask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer_eval, intrinsic=K, depth_gt=gt_depth,
                                                         shape_pred=outputs['pred_shape'], depth_pred=pred_depth, variance_pred=outputs['pred_variance'], lambda_pred=outputs['pred_lambda'])
 
-            minang = - np.pi / 3 * 2
-            maxang = 2 * np.pi - np.pi / 3 * 2
-
-            viewind = 0
-            fig_rgb = tensor2rgb(image, viewind=viewind)
-
-            pred_shape = outputs['pred_shape']
-            fig_angh = tensor2disp(pred_shape[:, 0].unsqueeze(1) - minang, vmax=maxang, viewind=viewind)
-            fig_angv = tensor2disp(pred_shape[:, 1].unsqueeze(1) - minang, vmax=maxang, viewind=viewind)
-
-            fig_depth = tensor2disp(1 / pred_depth, vmax=0.15, viewind=viewind)
-            fig_intre = tensor2disp(1 / int_re, vmax=0.15, viewind=viewind)
-
-            depth_norm = normoptizer_eval.depth2norm(depthMap=pred_depth, intrinsic=K)
-            intre_norm = normoptizer_eval.depth2norm(depthMap=int_re, intrinsic=K)
-            fig_depth_norm = tensor2rgb((depth_norm + 1) / 2, isnormed=False)
-            fig_intre_norm = tensor2rgb((intre_norm + 1) / 2, isnormed=False)
-
-            fig_variance = tensor2disp(outputs['pred_variance'], vmax=(args.clipvariance + 1), viewind=viewind)
-            fig_lambda = tensor2disp(outputs['pred_lambda'], vmax=1, viewind=viewind)
-
-            fignorm = normoptizer_eval.ang2normal(ang=pred_shape, intrinsic=K)
-            fignorm = np.array(tensor2rgb((fignorm + 1) / 2, viewind=viewind, isnormed=False))
-
-            fig_rgb.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'rgb.png'))
-            fig_angh.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'angh.png'))
-            fig_angv.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'angv.png'))
-            fig_depth.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'depth.png'))
-            fig_intre.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'depth_int.png'))
-            fig_depth_norm.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'depth_norm.png'))
-            fig_intre_norm.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'depth_int_norm.png'))
-            fig_variance.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'variance.png'))
-            fig_lambda.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'lambda.png'))
-            pil.fromarray(fignorm).save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'norm.png'))
-
-            figoveiewu = np.concatenate([np.array(fig_rgb), np.array(fignorm)], axis=1)
-            figoveiewd = np.concatenate([np.array(fig_angh), np.array(fig_angv)], axis=1)
-            figoveiewdd = np.concatenate([np.array(fig_lambda), np.array(fig_variance)], axis=1)
-            figoveiewddd = np.concatenate([np.array(fig_depth), np.array(fig_depth_norm)], axis=1)
-            figoveiewdddd = np.concatenate([np.array(fig_intre), np.array(fig_intre_norm)], axis=1)
-            figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd, figoveiewddd, figoveiewdddd], axis=0)
-
-            pil.fromarray(figoveiew).save(os.path.join(vlsroot, str(idx).zfill(6) + '.png'))
+            # minang = - np.pi / 3 * 2
+            # maxang = 2 * np.pi - np.pi / 3 * 2
+            #
+            # viewind = 0
+            # fig_rgb = tensor2rgb(image, viewind=viewind)
+            #
+            # pred_shape = outputs['pred_shape']
+            # fig_angh = tensor2disp(pred_shape[:, 0].unsqueeze(1) - minang, vmax=maxang, viewind=viewind)
+            # fig_angv = tensor2disp(pred_shape[:, 1].unsqueeze(1) - minang, vmax=maxang, viewind=viewind)
+            #
+            # fig_depth = tensor2disp(1 / pred_depth, vmax=0.15, viewind=viewind)
+            # fig_intre = tensor2disp(1 / int_re, vmax=0.15, viewind=viewind)
+            #
+            # depth_norm = normoptizer_eval.depth2norm(depthMap=pred_depth, intrinsic=K)
+            # intre_norm = normoptizer_eval.depth2norm(depthMap=int_re, intrinsic=K)
+            # fig_depth_norm = tensor2rgb((depth_norm + 1) / 2, isnormed=False)
+            # fig_intre_norm = tensor2rgb((intre_norm + 1) / 2, isnormed=False)
+            #
+            # fig_variance = tensor2disp(outputs['pred_variance'], vmax=(args.clipvariance + 1), viewind=viewind)
+            # fig_lambda = tensor2disp(outputs['pred_lambda'], vmax=1, viewind=viewind)
+            #
+            # fignorm = normoptizer_eval.ang2normal(ang=pred_shape, intrinsic=K)
+            # fignorm = np.array(tensor2rgb((fignorm + 1) / 2, viewind=viewind, isnormed=False))
+            #
+            # fig_rgb.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'rgb.png'))
+            # fig_angh.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'angh.png'))
+            # fig_angv.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'angv.png'))
+            # fig_depth.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'depth.png'))
+            # fig_intre.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'depth_int.png'))
+            # fig_depth_norm.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'depth_norm.png'))
+            # fig_intre_norm.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'depth_int_norm.png'))
+            # fig_variance.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'variance.png'))
+            # fig_lambda.save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'lambda.png'))
+            # pil.fromarray(fignorm).save(os.path.join('/home/shengjie/Desktop/2020_12/2020_12_23', 'norm.png'))
+            #
+            # figoveiewu = np.concatenate([np.array(fig_rgb), np.array(fignorm)], axis=1)
+            # figoveiewd = np.concatenate([np.array(fig_angh), np.array(fig_angv)], axis=1)
+            # figoveiewdd = np.concatenate([np.array(fig_lambda), np.array(fig_variance)], axis=1)
+            # figoveiewddd = np.concatenate([np.array(fig_depth), np.array(fig_depth_norm)], axis=1)
+            # figoveiewdddd = np.concatenate([np.array(fig_intre), np.array(fig_intre_norm)], axis=1)
+            # figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd, figoveiewddd, figoveiewdddd], axis=0)
+            #
+            # pil.fromarray(figoveiew).save(os.path.join(vlsroot, str(idx).zfill(6) + '.png'))
 
             pred_depth = pred_depth.cpu().numpy().squeeze()
             pred_depth_int = int_re.cpu().numpy().squeeze()
