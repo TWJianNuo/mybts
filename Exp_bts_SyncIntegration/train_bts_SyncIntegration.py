@@ -511,43 +511,43 @@ def main_worker(gpu, ngpus_per_node, args):
     while epoch < args.num_epochs:
         if args.distributed:
             dataloader.train_sampler.set_epoch(epoch)
+        with autograd.detect_anomaly():
+            for step, sample_batched in enumerate(dataloader.data):
+                optimizer.zero_grad()
 
-        for step, sample_batched in enumerate(dataloader.data):
-            optimizer.zero_grad()
+                before_op_time = time.time()
 
-            before_op_time = time.time()
+                image = torch.autograd.Variable(sample_batched['image'].cuda(args.gpu, non_blocking=True))
+                focal = torch.autograd.Variable(sample_batched['focal'].cuda(args.gpu, non_blocking=True))
+                depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
+                K = torch.autograd.Variable(sample_batched['K'].cuda(args.gpu, non_blocking=True))
 
-            image = torch.autograd.Variable(sample_batched['image'].cuda(args.gpu, non_blocking=True))
-            focal = torch.autograd.Variable(sample_batched['focal'].cuda(args.gpu, non_blocking=True))
-            depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
-            K = torch.autograd.Variable(sample_batched['K'].cuda(args.gpu, non_blocking=True))
+                outputs = model(image, focal)
 
-            outputs = model(image, focal)
+                pred_depth = outputs['final_depth']
+                pred_shape = outputs['pred_shape']
+                pred_variance = outputs['pred_variance']
+                pred_lambda = outputs['pred_lambda']
+                mask = depth_gt > 1.0
+                mask = mask.to(torch.bool)
 
-            pred_depth = outputs['final_depth']
-            pred_shape = outputs['pred_shape']
-            pred_variance = outputs['pred_variance']
-            pred_lambda = outputs['pred_lambda']
-            mask = depth_gt > 1.0
-            mask = mask.to(torch.bool)
+                loss_depth = compute_depth_loss(silog_criterion, pred_depth, depth_gt, mask)
+                loss_shape = compute_shape_loss(normoptizer, pred_shape, K, depth_gt)
 
-            loss_depth = compute_depth_loss(silog_criterion, pred_depth, depth_gt, mask)
-            loss_shape = compute_shape_loss(normoptizer, pred_shape, K, depth_gt)
+                int_re, lateral_re, intmask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer, intrinsic=K, depth_gt=depth_gt, shape_pred=pred_shape, depth_pred=pred_depth, variance_pred=pred_variance, lambda_pred=pred_lambda)
+                lateralloss = compute_depth_loss(silog_criterion, lateral_re, depth_gt, mask)
+                intloss = compute_depth_loss(silog_criterion, int_re, depth_gt, mask)
 
-            int_re, lateral_re, intmask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer, intrinsic=K, depth_gt=depth_gt, shape_pred=pred_shape, depth_pred=pred_depth, variance_pred=pred_variance, lambda_pred=pred_lambda)
-            lateralloss = compute_depth_loss(silog_criterion, lateral_re, depth_gt, mask)
-            intloss = compute_depth_loss(silog_criterion, int_re, depth_gt, mask)
+                loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw
 
-            loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw
+                if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
+                    print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], lr: {:.12f}, loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, current_lr, loss))
+                    if np.isnan(loss.cpu().item()):
+                        print('NaN in loss occurred. Aborting training.')
+                        continue
 
-            if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
-                print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], lr: {:.12f}, loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, current_lr, loss))
-                if np.isnan(loss.cpu().item()):
-                    print('NaN in loss occurred. Aborting training.')
-                    continue
-
-            loss.backward()
-            optimizer.step()
+                loss.backward()
+                optimizer.step()
 
             if global_step / num_lrmod_steps <= 1:
                 for param_group in optimizer.param_groups:
