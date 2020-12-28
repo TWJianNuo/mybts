@@ -544,7 +544,8 @@ def main_worker(gpu, ngpus_per_node, args):
             consistlossx, consistlossy, depthMap_gradx, depthMap_grady, depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = compute_consistence_loss(normoptizer, pred_shape, K, pred_depth, pred_variance, pred_lambda)
             consistloss = (consistlossx.mean() + consistlossy.mean()) / 2
 
-            loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw + consistloss * args.consistw
+            # loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw + consistloss * args.consistw
+            loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw
             loss.backward()
 
             if global_step / num_lrmod_steps <= 1:
