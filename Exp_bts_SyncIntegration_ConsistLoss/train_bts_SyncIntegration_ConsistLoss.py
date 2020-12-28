@@ -541,8 +541,8 @@ def main_worker(gpu, ngpus_per_node, args):
             lateralloss = compute_depth_loss(silog_criterion, lateral_re, depth_gt, mask)
             intloss = compute_depth_loss(silog_criterion, int_re, depth_gt, mask)
 
-            consistlossx, consistlossy, depthMap_gradx, depthMap_grady, depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = compute_consistence_loss(normoptizer, pred_shape, K, pred_depth, pred_variance, pred_lambda)
-            consistloss = (consistlossx.mean() + consistlossy.mean()) / 2
+            # consistlossx, consistlossy, depthMap_gradx, depthMap_grady, depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = compute_consistence_loss(normoptizer, pred_shape, K, pred_depth, pred_variance, pred_lambda)
+            # consistloss = (consistlossx.mean() + consistlossy.mean()) / 2
 
             # loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw + consistloss * args.consistw
             loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw
@@ -602,19 +602,20 @@ def main_worker(gpu, ngpus_per_node, args):
                     fig_depth_intre = tensor2disp(1/int_re, vmax=0.15, viewind=viewind)
                     fig_depth_intre_norm = tensor2rgb((normoptizer.depth2norm(depthMap=int_re, intrinsic=K) + 1) / 2, isnormed=False)
 
-                    figgrad_depthx = tensor2grad(depthMap_gradx, pos_bar=0.1, neg_bar=-0.1, viewind=0)
-                    figgrad_depthy = tensor2grad(depthMap_grady, pos_bar=0.1, neg_bar=-0.1, viewind=0)
-                    figgrad_depthx_est = tensor2grad(depthMap_gradx_est * inboundh, pos_bar=0.1, neg_bar=-0.1, viewind=0)
-                    figgrad_depthy_est = tensor2grad(depthMap_grady_est * inboundv, pos_bar=0.1, neg_bar=-0.1, viewind=0)
+                    # figgrad_depthx = tensor2grad(depthMap_gradx, pos_bar=0.1, neg_bar=-0.1, viewind=0)
+                    # figgrad_depthy = tensor2grad(depthMap_grady, pos_bar=0.1, neg_bar=-0.1, viewind=0)
+                    # figgrad_depthx_est = tensor2grad(depthMap_gradx_est * inboundh, pos_bar=0.1, neg_bar=-0.1, viewind=0)
+                    # figgrad_depthy_est = tensor2grad(depthMap_grady_est * inboundv, pos_bar=0.1, neg_bar=-0.1, viewind=0)
 
                     figoveiewu = np.concatenate([np.array(fig_rgb), np.array(fignorm)], axis=1)
                     figoveiewd = np.concatenate([np.array(fig_angh), np.array(fig_angv)], axis=1)
                     figoveiewdd = np.concatenate([np.array(fig_depth), np.array(fig_depth_norm)], axis=1)
                     figoveiewddd = np.concatenate([np.array(fig_depth_intre), np.array(fig_depth_intre_norm)], axis=1)
                     figoveiewdddd = np.concatenate([np.array(fig_lambda), np.array(fig_variance)], axis=1)
-                    figoveiewddddd = np.concatenate([np.array(figgrad_depthx), np.array(figgrad_depthy)], axis=1)
-                    figoveiewdddddd = np.concatenate([np.array(figgrad_depthx_est), np.array(figgrad_depthy_est)], axis=1)
-                    figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd, figoveiewddd, figoveiewdddd, figoveiewddddd, figoveiewdddddd], axis=0)
+                    # figoveiewddddd = np.concatenate([np.array(figgrad_depthx), np.array(figgrad_depthy)], axis=1)
+                    # figoveiewdddddd = np.concatenate([np.array(figgrad_depthx_est), np.array(figgrad_depthy_est)], axis=1)
+                    # figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd, figoveiewddd, figoveiewdddd, figoveiewddddd, figoveiewdddddd], axis=0)
+                    figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd, figoveiewddd, figoveiewdddd], axis=0)
 
                     writer.add_image('oview', (torch.from_numpy(figoveiew).float() / 255).permute([2, 0, 1]), global_step)
                     if version_num > 1100000000:
