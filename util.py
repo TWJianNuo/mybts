@@ -31,6 +31,26 @@ def tensor2disp(tensor, vmax=0.18, percentile=None, viewind=0):
     tnp = (cm(tnp) * 255).astype(np.uint8)
     return pil.fromarray(tnp[:, :, 0:3])
 
+def tensor2grad(gradtensor, percentile=95, pos_bar=0, neg_bar=0, viewind=0):
+    cm = plt.get_cmap('bwr')
+    gradnumpy = gradtensor.detach().cpu().numpy()[viewind, 0, :, :]
+
+    selector_pos = gradnumpy > 0
+    if np.sum(selector_pos) > 1:
+        if pos_bar <= 0:
+            pos_bar = np.percentile(gradnumpy[selector_pos], percentile)
+        gradnumpy[selector_pos] = gradnumpy[selector_pos] / pos_bar / 2
+
+    selector_neg = gradnumpy < 0
+    if np.sum(selector_neg) > 1:
+        if neg_bar >= 0:
+            neg_bar = -np.percentile(-gradnumpy[selector_neg], percentile)
+        gradnumpy[selector_neg] = -gradnumpy[selector_neg] / neg_bar / 2
+
+    disp_grad_numpy = gradnumpy + 0.5
+    colorMap = cm(disp_grad_numpy)[:,:,0:3]
+    return pil.fromarray((colorMap * 255).astype(np.uint8))
+
 def tensor2disp_circ(tensor, vmax=0.18, percentile=None, viewind=0):
     cm = plt.get_cmap('hsv')
     tnp = tensor[viewind, 0, :, :].detach().cpu().numpy()
@@ -199,6 +219,19 @@ class SurfaceNormalOptimizer(nn.Module):
 
         self.diffx_sharp.weight = nn.Parameter(weightsx, requires_grad=False)
         self.diffy_sharp.weight = nn.Parameter(weightsy, requires_grad=False)
+
+        weightsxval = torch.Tensor([[0., 0., 0.],
+                                    [0., 1., 1.],
+                                    [0., 0., 0.]]).unsqueeze(0).unsqueeze(0)
+
+        weightsyval = torch.Tensor([[0., 0., 0.],
+                                    [0., 1., 0.],
+                                    [0., 1., 0.]]).unsqueeze(0).unsqueeze(0)
+        self.diffx_sharp_val = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+        self.diffy_sharp_val = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+
+        self.diffx_sharp_val.weight = nn.Parameter(weightsxval, requires_grad=False)
+        self.diffy_sharp_val.weight = nn.Parameter(weightsyval, requires_grad=False)
 
     def depth2norm(self, depthMap, intrinsic, issharp=True):
         depthMaps = depthMap.squeeze(1)
@@ -403,33 +436,6 @@ class SurfaceNormalOptimizer(nn.Module):
         # ckvestl = logv[ckz, cky, ckx]
         return ang
 
-    def ang2grad(self, ang, intrinsic, depthMap):
-        depthMaps = depthMap.squeeze(1)
-        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
-        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
-        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
-        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
-
-        angh = ang[:, 0, :, :]
-        angv = ang[:, 1, :, :]
-
-        depthMap_gradx_est = depthMaps / fx * torch.sin(angh) / ((((self.yy - by) / fy) ** 2 + 1) * torch.cos(angh) - (self.xx - bx) / fx * torch.sin(angh))
-        depthMap_grady_est = depthMaps / fy * torch.sin(angv) / ((((self.xx - bx) / fx) ** 2 + 1) * torch.cos(angv) - (self.yy - by) / fy * torch.sin(angv))
-
-        depthMap_gradx_est = depthMap_gradx_est.unsqueeze(1).clamp(min=-1e6, max=1e6)
-        depthMap_grady_est = depthMap_grady_est.unsqueeze(1).clamp(min=-1e6, max=1e6)
-
-        # Check
-        # depthMap_gradx = self.diffx_sharp(depthMap)
-        # depthMap_grady = self.diffy_sharp(depthMap)
-        #
-        # tensor2grad(depthMap_gradx_est, viewind=0, percentile=80).show()
-        # tensor2grad(depthMap_gradx, viewind=0, percentile=80).show()
-        #
-        # tensor2grad(depthMap_grady_est, viewind=0, percentile=80).show()
-        # tensor2grad(depthMap_grady, viewind=0, percentile=80).show()
-        return depthMap_gradx_est, depthMap_grady_est
-
     def intergrationloss_ang(self, ang, intrinsic, depthMap):
         anglebound = 0.1
         protectmin = 1e-6
@@ -619,3 +625,70 @@ class SurfaceNormalOptimizer(nn.Module):
         predang = torch.cat([pred_angh, pred_angv], dim=1)
 
         return predang
+
+    def ang2grad(self, ang, intrinsic, depthMap):
+        anglebound = 0.1
+
+        depthMaps = depthMap.squeeze(1)
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+
+        angh = ang[:, 0, :, :]
+        angv = ang[:, 1, :, :]
+
+        a1 = ((self.yy - by) / fy)**2 + 1
+        b1 = -(self.xx - bx) / fx
+
+        a2 = ((self.yy - by) / fy)**2 + 1
+        b2 = -(self.xx + 1 - bx) / fx
+
+        u1 = ((self.xx - bx) / fx)**2 + 1
+        v1 = -(self.yy - by) / fy
+
+        u2 = ((self.xx - bx) / fx)**2 + 1
+        v2 = -(self.yy + 1 - by) / fy
+
+        low_angh = torch.atan2(-a1, b1)
+        high_angh = torch.atan2(a2, -b2)
+        pred_angh = angh
+        inboundh = ((pred_angh < (high_angh - anglebound)) * (pred_angh > (low_angh + anglebound))).float()
+        inboundh = inboundh.unsqueeze(1)
+
+        low_angv = torch.atan2(-u1, v1)
+        high_angv = torch.atan2(u2, -v2)
+        pred_angv = angv
+        inboundv = ((pred_angv < (high_angv - anglebound)) * (pred_angv > (low_angv + anglebound))).float()
+        inboundv = inboundv.unsqueeze(1)
+
+        depthMap_gradx_est = depthMaps / fx * torch.sin(angh) / ((((self.yy - by) / fy) ** 2 + 1) * torch.cos(angh) - (self.xx - bx) / fx * torch.sin(angh))
+        depthMap_grady_est = depthMaps / fy * torch.sin(angv) / ((((self.xx - bx) / fx) ** 2 + 1) * torch.cos(angv) - (self.yy - by) / fy * torch.sin(angv))
+
+        depthMap_gradx_est = depthMap_gradx_est.unsqueeze(1).clamp(min=-1e6, max=1e6)
+        depthMap_grady_est = depthMap_grady_est.unsqueeze(1).clamp(min=-1e6, max=1e6)
+
+        # Check
+        # depthMap_gradx = self.diffx_sharp(depthMap)
+        # depthMap_grady = self.diffy_sharp(depthMap)
+        #
+        # tensor2grad(depthMap_gradx_est, viewind=0, percentile=80).show()
+        # tensor2grad(depthMap_gradx, viewind=0, percentile=80).show()
+        #
+        # tensor2grad(depthMap_grady_est, viewind=0, percentile=80).show()
+        # tensor2grad(depthMap_grady, viewind=0, percentile=80).show()
+        return depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv
+
+    def depth2grad(self, depthMap, isgt=False):
+        depthMap_gradx = self.diffx_sharp(depthMap)
+        depthMap_grady = self.diffy_sharp(depthMap)
+
+        if isgt:
+            depthMapInd = (depthMap > 0).float()
+            depthMap_gradx_ind = self.diffx_sharp_val(depthMapInd)
+            depthMap_grady_ind = self.diffy_sharp_val(depthMapInd)
+
+            depthMap_gradx[depthMap_gradx_ind != 2] = 0
+            depthMap_grady[depthMap_grady_ind != 2] = 0
+
+        return depthMap_gradx, depthMap_grady
