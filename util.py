@@ -663,14 +663,18 @@ class SurfaceNormalOptimizer(nn.Module):
             inboundv = inboundv.unsqueeze(1)
 
             kx = (((self.yy - by) / fy) ** 2 + 1) * torch.cos(angh) - (self.xx - bx) / fx * torch.sin(angh)
-            signx = kx.sign()
-            kx = signx * kx.abs_().clamp_(min=1e-6, max=1e6)
+            signx = torch.sign(kx)
+            kx = signx * torch.clamp(torch.abs(kx), min=1e-6, max=1e6)
             kx = torch.sin(angh) / kx / fx
 
             ky = (((self.xx - bx) / fx) ** 2 + 1) * torch.cos(angv) - (self.yy - by) / fy * torch.sin(angv)
-            signy = ky.sign()
-            ky = signy * ky.abs_().clamp_(min=1e-6, max=1e6)
+            signy = torch.sign(ky)
+            ky = signy * torch.clamp(torch.abs(ky), min=1e-6, max=1e6)
             ky = torch.sin(angv) / ky / fy
+
+            if torch.sum(torch.isnan(kx)) + torch.sum(torch.isnan(ky)) > 0:
+                print("error detected")
+                return -1
 
         depthMaps = depthMap.squeeze(1)
         depthMap_gradx_est = (depthMaps * kx).unsqueeze(1)

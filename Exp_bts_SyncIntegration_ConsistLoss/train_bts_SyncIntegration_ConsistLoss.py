@@ -320,7 +320,7 @@ def compute_depth_loss(silog_criterion, pred_depth, depth_gt, mask=None):
 def compute_consistence_loss(normoptizer, pred_shape, intrinsic, pred_depth, pred_variance, pred_lambda):
     confidencebar = 0.5
     depthMap_gradx, depthMap_grady = normoptizer.depth2grad(depthMap=pred_depth)
-    depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = normoptizer.ang2grad(ang=pred_shape.detach(), depthMap=pred_depth, intrinsic=intrinsic)
+    depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = normoptizer.ang2grad(ang=pred_shape, depthMap=pred_depth, intrinsic=intrinsic)
 
     mask = torch.ones_like(pred_depth)
     mask[:, :, 0:100, :] = 0
