@@ -560,7 +560,7 @@ def main_worker(gpu, ngpus_per_node, args):
                     print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], lr: {:.12f}, loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, current_lr, loss))
                     if np.isnan(loss.cpu().item()):
                         print('NaN in loss occurred. Aborting training.')
-                        return -1
+                        continue
     
                 optimizer.step()
 
