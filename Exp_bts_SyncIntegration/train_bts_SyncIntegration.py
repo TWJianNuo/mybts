@@ -511,53 +511,53 @@ def main_worker(gpu, ngpus_per_node, args):
     while epoch < args.num_epochs:
         if args.distributed:
             dataloader.train_sampler.set_epoch(epoch)
-        with torch.autograd.detect_anomaly():
-            for step, sample_batched in enumerate(dataloader.data):
-                optimizer.zero_grad()
 
-                before_op_time = time.time()
+        for step, sample_batched in enumerate(dataloader.data):
+            optimizer.zero_grad()
 
-                image = torch.autograd.Variable(sample_batched['image'].cuda(args.gpu, non_blocking=True))
-                focal = torch.autograd.Variable(sample_batched['focal'].cuda(args.gpu, non_blocking=True))
-                depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
-                K = torch.autograd.Variable(sample_batched['K'].cuda(args.gpu, non_blocking=True))
+            before_op_time = time.time()
 
-                outputs = model(image, focal)
+            image = torch.autograd.Variable(sample_batched['image'].cuda(args.gpu, non_blocking=True))
+            focal = torch.autograd.Variable(sample_batched['focal'].cuda(args.gpu, non_blocking=True))
+            depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
+            K = torch.autograd.Variable(sample_batched['K'].cuda(args.gpu, non_blocking=True))
 
-                pred_depth = outputs['final_depth']
-                pred_shape = outputs['pred_shape']
-                pred_variance = outputs['pred_variance']
-                pred_lambda = outputs['pred_lambda']
-                mask = depth_gt > 1.0
-                mask = mask.to(torch.bool)
+            outputs = model(image, focal)
 
-                loss_depth = compute_depth_loss(silog_criterion, pred_depth, depth_gt, mask)
-                loss_shape = compute_shape_loss(normoptizer, pred_shape, K, depth_gt)
+            pred_depth = outputs['final_depth']
+            pred_shape = outputs['pred_shape']
+            pred_variance = outputs['pred_variance']
+            pred_lambda = outputs['pred_lambda']
+            mask = depth_gt > 1.0
+            mask = mask.to(torch.bool)
 
-                int_re, lateral_re, intmask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer, intrinsic=K, depth_gt=depth_gt, shape_pred=pred_shape, depth_pred=pred_depth, variance_pred=pred_variance, lambda_pred=pred_lambda)
-                lateralloss = compute_depth_loss(silog_criterion, lateral_re, depth_gt, mask)
-                intloss = compute_depth_loss(silog_criterion, int_re, depth_gt, mask)
+            loss_depth = compute_depth_loss(silog_criterion, pred_depth, depth_gt, mask)
+            loss_shape = compute_shape_loss(normoptizer, pred_shape, K, depth_gt)
 
-                loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw
+            int_re, lateral_re, intmask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer, intrinsic=K, depth_gt=depth_gt, shape_pred=pred_shape, depth_pred=pred_depth, variance_pred=pred_variance, lambda_pred=pred_lambda)
+            lateralloss = compute_depth_loss(silog_criterion, lateral_re, depth_gt, mask)
+            intloss = compute_depth_loss(silog_criterion, int_re, depth_gt, mask)
 
-                if global_step / num_lrmod_steps <= 1:
-                    for param_group in optimizer.param_groups:
-                        if param_group['name'] != 'shapenet':
-                            current_lr = (args.learning_rate - 0.1 * args.learning_rate) * (
-                                        1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate
-                        else:
-                            current_lr = (args.learning_rate_shape - 0.1 * args.learning_rate_shape) * (
-                                        1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate_shape
-                        param_group['lr'] = current_lr
+            loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw
 
-                if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
-                    print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], lr: {:.12f}, loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, current_lr, loss))
-                    if np.isnan(loss.cpu().item()):
-                        print('NaN in loss occurred. Aborting training.')
-                        continue
+            if global_step / num_lrmod_steps <= 1:
+                for param_group in optimizer.param_groups:
+                    if param_group['name'] != 'shapenet':
+                        current_lr = (args.learning_rate - 0.1 * args.learning_rate) * (
+                                    1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate
+                    else:
+                        current_lr = (args.learning_rate_shape - 0.1 * args.learning_rate_shape) * (
+                                    1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate_shape
+                    param_group['lr'] = current_lr
 
-                loss.backward()
-                optimizer.step()
+            if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
+                print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], lr: {:.12f}, loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, current_lr, loss))
+                if np.isnan(loss.cpu().item()):
+                    print('NaN in loss occurred. Aborting training.')
+                    continue
+
+            loss.backward()
+            optimizer.step()
 
             duration += time.time() - before_op_time
             if global_step and global_step % args.log_freq == 0 and not model_just_loaded:
