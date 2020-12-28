@@ -320,7 +320,7 @@ def compute_depth_loss(silog_criterion, pred_depth, depth_gt, mask=None):
 def compute_consistence_loss(normoptizer, pred_shape, intrinsic, pred_depth, pred_variance, pred_lambda):
     confidencebar = 0.5
     depthMap_gradx, depthMap_grady = normoptizer.depth2grad(depthMap=pred_depth)
-    depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = normoptizer.ang2grad(ang=pred_shape, depthMap=pred_depth, intrinsic=intrinsic)
+    depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = normoptizer.ang2grad(ang=pred_shape.detach(), depthMap=pred_depth, intrinsic=intrinsic)
 
     mask = torch.ones_like(pred_depth)
     mask[:, :, 0:100, :] = 0
@@ -330,7 +330,6 @@ def compute_consistence_loss(normoptizer, pred_shape, intrinsic, pred_depth, pre
 
     consistlossx = torch.abs(depthMap_gradx - depthMap_gradx_est) * confidence * mask * inboundh
     consistlossy = torch.abs(depthMap_grady - depthMap_grady_est) * confidence * mask * inboundv
-
 
     # tensor2disp(consistlossx, vmax=0.05, viewind=0).show()
     # tensor2disp(confidence, vmax=1, viewind=0).show()
@@ -347,7 +346,7 @@ def compute_consistence_loss(normoptizer, pred_shape, intrinsic, pred_depth, pre
     # tensor2grad(depthMap_grady, pos_bar=0.1, neg_bar=-0.1, viewind=0).show()
     # fig_angh.show()
     # fig_angv.show()
-    return consistlossx, consistlossy
+    return consistlossx, consistlossy, depthMap_gradx, depthMap_grady, depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv
 
 def compute_intre(integrater, normoptizer, intrinsic, depth_gt, shape_pred, depth_pred, variance_pred, lambda_pred):
     pred_log = normoptizer.ang2log(intrinsic=intrinsic, ang=shape_pred)
@@ -542,7 +541,7 @@ def main_worker(gpu, ngpus_per_node, args):
             lateralloss = compute_depth_loss(silog_criterion, lateral_re, depth_gt, mask)
             intloss = compute_depth_loss(silog_criterion, int_re, depth_gt, mask)
 
-            consistlossx, consistlossy = compute_consistence_loss(normoptizer, pred_shape, K, pred_depth, pred_variance, pred_lambda)
+            consistlossx, consistlossy, depthMap_gradx, depthMap_grady, depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = compute_consistence_loss(normoptizer, pred_shape, K, pred_depth, pred_variance, pred_lambda)
             consistloss = (consistlossx.mean() + consistlossy.mean()) / 2
 
             loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw + consistloss * args.consistw
@@ -556,13 +555,13 @@ def main_worker(gpu, ngpus_per_node, args):
                         current_lr = (args.learning_rate_shape - 0.1 * args.learning_rate_shape) * (1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate_shape
                     param_group['lr'] = current_lr
 
-            optimizer.step()
-
             if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
                 print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], lr: {:.12f}, loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, current_lr, loss))
                 if np.isnan(loss.cpu().item()):
                     print('NaN in loss occurred. Aborting training.')
                     return -1
+
+            optimizer.step()
 
             duration += time.time() - before_op_time
             if global_step and global_step % args.log_freq == 0 and not model_just_loaded:
@@ -602,16 +601,19 @@ def main_worker(gpu, ngpus_per_node, args):
                     fig_depth_intre = tensor2disp(1/int_re, vmax=0.15, viewind=viewind)
                     fig_depth_intre_norm = tensor2rgb((normoptizer.depth2norm(depthMap=int_re, intrinsic=K) + 1) / 2, isnormed=False)
 
-                    fig_consistlossx = tensor2disp(consistlossx, vmax=0.05, viewind=viewind)
-                    fig_consistlossy = tensor2disp(consistlossy, vmax=0.1, viewind=viewind)
+                    figgrad_depthx = tensor2grad(depthMap_gradx, pos_bar=0.1, neg_bar=-0.1, viewind=0)
+                    figgrad_depthy = tensor2grad(depthMap_grady, pos_bar=0.1, neg_bar=-0.1, viewind=0)
+                    figgrad_depthx_est = tensor2grad(depthMap_gradx_est * inboundh, pos_bar=0.1, neg_bar=-0.1, viewind=0)
+                    figgrad_depthy_est = tensor2grad(depthMap_grady_est * inboundv, pos_bar=0.1, neg_bar=-0.1, viewind=0)
 
                     figoveiewu = np.concatenate([np.array(fig_rgb), np.array(fignorm)], axis=1)
                     figoveiewd = np.concatenate([np.array(fig_angh), np.array(fig_angv)], axis=1)
                     figoveiewdd = np.concatenate([np.array(fig_depth), np.array(fig_depth_norm)], axis=1)
                     figoveiewddd = np.concatenate([np.array(fig_depth_intre), np.array(fig_depth_intre_norm)], axis=1)
                     figoveiewdddd = np.concatenate([np.array(fig_lambda), np.array(fig_variance)], axis=1)
-                    figoveiewddddd = np.concatenate([np.array(fig_consistlossx), np.array(fig_consistlossy)], axis=1)
-                    figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd, figoveiewddd, figoveiewdddd, figoveiewddddd], axis=0)
+                    figoveiewddddd = np.concatenate([np.array(figgrad_depthx), np.array(figgrad_depthy)], axis=1)
+                    figoveiewdddddd = np.concatenate([np.array(figgrad_depthx_est), np.array(figgrad_depthy_est)], axis=1)
+                    figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd, figoveiewddd, figoveiewdddd, figoveiewddddd, figoveiewdddddd], axis=0)
 
                     writer.add_image('oview', (torch.from_numpy(figoveiew).float() / 255).permute([2, 0, 1]), global_step)
                     if version_num > 1100000000:
