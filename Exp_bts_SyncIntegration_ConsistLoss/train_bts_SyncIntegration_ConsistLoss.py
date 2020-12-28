@@ -325,8 +325,12 @@ def compute_consistence_loss(normoptizer, pred_shape, intrinsic, pred_depth, pre
     mask = torch.ones_like(pred_depth)
     mask[:, :, 0:100, :] = 0
 
-    confidence = torch.exp(-pred_variance) * pred_lambda
+    confidence = (torch.exp(-pred_variance) * pred_lambda).detach()
     confidence[confidence < confidencebar] = 0
+
+    if torch.sum(torch.isnan(depthMap_grady)) + torch.sum(torch.isnan(depthMap_grady_est)) + torch.sum(torch.isnan(depthMap_gradx)) + torch.sum(torch.isnan(depthMap_gradx_est)) > 0:
+        print("Nan detected")
+        return -1
 
     consistlossx = torch.abs(depthMap_gradx - depthMap_gradx_est) * confidence * mask * inboundh
     consistlossy = torch.abs(depthMap_grady - depthMap_grady_est) * confidence * mask * inboundv
