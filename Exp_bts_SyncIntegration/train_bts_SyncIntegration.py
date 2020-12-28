@@ -545,7 +545,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 if np.isnan(loss.cpu().item()):
                     print('NaN in loss occurred. Aborting training.')
                     continue
-                    
+
             loss.backward()
             optimizer.step()
 
