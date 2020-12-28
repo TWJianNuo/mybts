@@ -662,17 +662,19 @@ class SurfaceNormalOptimizer(nn.Module):
             inboundv = ((pred_angv < (high_angv - anglebound)) * (pred_angv > (low_angv + anglebound))).float()
             inboundv = inboundv.unsqueeze(1)
 
-            denominatorx = (((self.yy - by) / fy) ** 2 + 1) * torch.cos(angh) - (self.xx - bx) / fx * torch.sin(angh)
-            signx = denominatorx.sign()
-            denominatorx = signx * denominatorx.abs_().clamp_(min=1e-6, max=1e6)
+            kx = (((self.yy - by) / fy) ** 2 + 1) * torch.cos(angh) - (self.xx - bx) / fx * torch.sin(angh)
+            signx = kx.sign()
+            kx = signx * kx.abs_().clamp_(min=1e-6, max=1e6)
+            kx = torch.sin(angh) / kx / fx
 
-            denominatory = (((self.xx - bx) / fx) ** 2 + 1) * torch.cos(angv) - (self.yy - by) / fy * torch.sin(angv)
-            signy = denominatory.sign()
-            denominatory = signy * denominatory.abs_().clamp_(min=1e-6, max=1e6)
+            ky = (((self.xx - bx) / fx) ** 2 + 1) * torch.cos(angv) - (self.yy - by) / fy * torch.sin(angv)
+            signy = ky.sign()
+            ky = signy * ky.abs_().clamp_(min=1e-6, max=1e6)
+            ky = torch.sin(angv) / ky / fy
 
         depthMaps = depthMap.squeeze(1)
-        depthMap_gradx_est = (depthMaps / fx * torch.sin(angh) / denominatorx).unsqueeze(1).clamp_(min=-1e6, max=1e6)
-        depthMap_grady_est = (depthMaps / fy * torch.sin(angv) / denominatory).unsqueeze(1).clamp_(min=-1e6, max=1e6)
+        depthMap_gradx_est = (depthMaps * kx).unsqueeze(1)
+        depthMap_grady_est = (depthMaps * ky).unsqueeze(1)
 
         # depthMap_gradx_est = depthMaps / fx * torch.sin(angh) / ((((self.yy - by) / fy) ** 2 + 1) * torch.cos(angh) - (self.xx - bx) / fx * torch.sin(angh))
         # depthMap_grady_est = depthMaps / fy * torch.sin(angv) / ((((self.xx - bx) / fx) ** 2 + 1) * torch.cos(angv) - (self.yy - by) / fy * torch.sin(angv))
