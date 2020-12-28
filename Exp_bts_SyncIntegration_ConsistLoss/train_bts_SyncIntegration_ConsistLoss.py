@@ -541,11 +541,11 @@ def main_worker(gpu, ngpus_per_node, args):
             lateralloss = compute_depth_loss(silog_criterion, lateral_re, depth_gt, mask)
             intloss = compute_depth_loss(silog_criterion, int_re, depth_gt, mask)
 
-            consistlossx, consistlossy, depthMap_gradx, depthMap_grady, depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = compute_consistence_loss(normoptizer, pred_shape, K, pred_depth, pred_variance, pred_lambda)
-            consistloss = (consistlossx.mean() + consistlossy.mean()) / 2
+            # consistlossx, consistlossy, depthMap_gradx, depthMap_grady, depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = compute_consistence_loss(normoptizer, pred_shape, K, pred_depth, pred_variance, pred_lambda)
+            # consistloss = (consistlossx.mean() + consistlossy.mean()) / 2
 
-            loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw + consistloss * args.consistw
-            # loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw
+            # loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw + consistloss * args.consistw
+            loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw
             loss.backward()
 
             if global_step / num_lrmod_steps <= 1:

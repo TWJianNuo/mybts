@@ -627,48 +627,47 @@ class SurfaceNormalOptimizer(nn.Module):
         return predang
 
     def ang2grad(self, ang, intrinsic, depthMap):
-        with torch.no_grad():
-            anglebound = 0.1
+        anglebound = 0.1
 
-            fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
-            bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
-            fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
-            by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
 
-            angh = ang[:, 0, :, :]
-            angv = ang[:, 1, :, :]
+        angh = ang[:, 0, :, :]
+        angv = ang[:, 1, :, :]
 
-            a1 = ((self.yy - by) / fy)**2 + 1
-            b1 = -(self.xx - bx) / fx
+        a1 = ((self.yy - by) / fy)**2 + 1
+        b1 = -(self.xx - bx) / fx
 
-            a2 = ((self.yy - by) / fy)**2 + 1
-            b2 = -(self.xx + 1 - bx) / fx
+        a2 = ((self.yy - by) / fy)**2 + 1
+        b2 = -(self.xx + 1 - bx) / fx
 
-            u1 = ((self.xx - bx) / fx)**2 + 1
-            v1 = -(self.yy - by) / fy
+        u1 = ((self.xx - bx) / fx)**2 + 1
+        v1 = -(self.yy - by) / fy
 
-            u2 = ((self.xx - bx) / fx)**2 + 1
-            v2 = -(self.yy + 1 - by) / fy
+        u2 = ((self.xx - bx) / fx)**2 + 1
+        v2 = -(self.yy + 1 - by) / fy
 
-            low_angh = torch.atan2(-a1, b1)
-            high_angh = torch.atan2(a2, -b2)
-            pred_angh = angh
-            inboundh = ((pred_angh < (high_angh - anglebound)) * (pred_angh > (low_angh + anglebound))).float()
-            inboundh = inboundh.unsqueeze(1)
+        low_angh = torch.atan2(-a1, b1)
+        high_angh = torch.atan2(a2, -b2)
+        pred_angh = angh
+        inboundh = ((pred_angh < (high_angh - anglebound)) * (pred_angh > (low_angh + anglebound))).float()
+        inboundh = inboundh.unsqueeze(1)
 
-            low_angv = torch.atan2(-u1, v1)
-            high_angv = torch.atan2(u2, -v2)
-            pred_angv = angv
-            inboundv = ((pred_angv < (high_angv - anglebound)) * (pred_angv > (low_angv + anglebound))).float()
-            inboundv = inboundv.unsqueeze(1)
+        low_angv = torch.atan2(-u1, v1)
+        high_angv = torch.atan2(u2, -v2)
+        pred_angv = angv
+        inboundv = ((pred_angv < (high_angv - anglebound)) * (pred_angv > (low_angv + anglebound))).float()
+        inboundv = inboundv.unsqueeze(1)
 
-            denominatorx = (((self.yy - by) / fy) ** 2 + 1) * torch.cos(angh) - (self.xx - bx) / fx * torch.sin(angh)
-            signx = denominatorx.sign()
-            denominatorx = signx * denominatorx.abs_().clamp_(min=1e-6, max=1e6)
+        denominatorx = (((self.yy - by) / fy) ** 2 + 1) * torch.cos(angh) - (self.xx - bx) / fx * torch.sin(angh)
+        signx = denominatorx.sign()
+        denominatorx = signx * denominatorx.abs_().clamp_(min=1e-6, max=1e6)
 
-            denominatory = (((self.xx - bx) / fx) ** 2 + 1) * torch.cos(angv) - (self.yy - by) / fy * torch.sin(angv)
-            signy = denominatory.sign()
-            denominatory = signy * denominatory.abs_().clamp_(min=1e-6, max=1e6)
+        denominatory = (((self.xx - bx) / fx) ** 2 + 1) * torch.cos(angv) - (self.yy - by) / fy * torch.sin(angv)
+        signy = denominatory.sign()
+        denominatory = signy * denominatory.abs_().clamp_(min=1e-6, max=1e6)
 
         depthMaps = depthMap.squeeze(1)
         depthMap_gradx_est = (depthMaps / fx * torch.sin(angh) / denominatorx).unsqueeze(1).clamp_(min=-1e6, max=1e6)
