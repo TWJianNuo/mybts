@@ -678,11 +678,13 @@ class SurfaceNormalOptimizer(nn.Module):
 
             kx = (((self.yy - by) / fy) ** 2 + 1) * torch.cos(angh) - (self.xx - bx) / fx * torch.sin(angh)
             signx = torch.sign(kx)
+            signx[signx == 0] = 1
             kx = signx * torch.clamp(torch.abs(kx), min=1e-2, max=1e2)
             kx = torch.sin(angh) / kx / fx
 
             ky = (((self.xx - bx) / fx) ** 2 + 1) * torch.cos(angv) - (self.yy - by) / fy * torch.sin(angv)
             signy = torch.sign(ky)
+            signy[signy == 0] = 1
             ky = signy * torch.clamp(torch.abs(ky), min=1e-2, max=1e2)
             ky = torch.sin(angv) / ky / fy
 
