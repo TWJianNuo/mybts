@@ -686,9 +686,9 @@ class SurfaceNormalOptimizer(nn.Module):
             ky = signy * torch.clamp(torch.abs(ky), min=1e-2, max=1e2)
             ky = torch.sin(angv) / ky / fy
 
-            # if torch.sum(torch.isnan(kx)) + torch.sum(torch.isnan(ky)) > 0:
-            #     print("error detected")
-            #     return -1
+        if torch.sum(torch.isnan(kx)) + torch.sum(torch.isnan(ky)) > 0:
+            print("error detected")
+            return -1
 
         depthMaps = depthMap.squeeze(1)
         depthMap_gradx_est = (depthMaps * kx).unsqueeze(1)
