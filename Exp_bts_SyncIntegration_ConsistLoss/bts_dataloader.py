@@ -139,8 +139,9 @@ class KittiDataset(Dataset):
             image = self.do_random_coloraug(image=image)
 
         image, depth_gt, K = self.to_tensor(image=image, depth_gt=depth_gt, K=K)
+        image_org = image.clone()
         image = self.color_normalize(image)
-        sample = {'image': image, 'depth': depth_gt, 'focal': focal, 'K': K, 'size': size}
+        sample = {'image': image, 'depth': depth_gt, 'focal': focal, 'K': K, 'size': size, 'image_org': image_org}
         return sample
 
     def get_depth(self, depth_path):

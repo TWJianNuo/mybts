@@ -41,6 +41,7 @@ from Exp_bts_SyncIntegration_ConsistLoss.bts_dataloader import BtsDataLoader
 from integrationModule import CRFIntegrationModule
 from util import *
 from Exp_bts_SyncIntegration_ConsistLoss.btsnet import convert_sync_batchnorm
+from torchvision import transforms
 
 version_num = torch.__version__
 version_num = ''.join(i for i in version_num if i.isdigit())
@@ -317,20 +318,22 @@ def compute_depth_loss(silog_criterion, pred_depth, depth_gt, mask=None):
     loss = silog_criterion.forward(pred_depth, depth_gt, mask)
     return loss
 
-def compute_consistence_loss(normoptizer, pred_shape, intrinsic, pred_depth, pred_variance, pred_lambda):
+def compute_consistence_loss(normoptizer, pred_shape, intrinsic, pred_depth, pred_variance, pred_lambda, rgb):
     confidencebar = 0.5
     depthMap_gradx, depthMap_grady = normoptizer.depth2grad(depthMap=pred_depth)
     depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = normoptizer.ang2grad(ang=pred_shape, depthMap=pred_depth, intrinsic=intrinsic)
+    rgbw = normoptizer.rgbgradw(rgb)
 
     mask = torch.ones_like(pred_depth)
     mask[:, :, 0:100, :] = 0
 
     confidence = (torch.exp(-pred_variance) * pred_lambda).detach()
     confidence[confidence < confidencebar] = 0
+    confidence = confidence * rgbw
 
-    if torch.sum(torch.isnan(depthMap_grady)) + torch.sum(torch.isnan(depthMap_grady_est)) + torch.sum(torch.isnan(depthMap_gradx)) + torch.sum(torch.isnan(depthMap_gradx_est)) > 0:
-        print("Nan detected")
-        return -1
+    # if torch.sum(torch.isnan(depthMap_grady)) + torch.sum(torch.isnan(depthMap_grady_est)) + torch.sum(torch.isnan(depthMap_gradx)) + torch.sum(torch.isnan(depthMap_gradx_est)) > 0:
+    #     print("Nan detected")
+    #     return -1
 
     consistlossx = torch.abs(depthMap_gradx - depthMap_gradx_est) * confidence * mask * inboundh
     consistlossy = torch.abs(depthMap_grady - depthMap_grady_est) * confidence * mask * inboundv
@@ -518,55 +521,56 @@ def main_worker(gpu, ngpus_per_node, args):
     while epoch < args.num_epochs:
         if args.distributed:
             dataloader.train_sampler.set_epoch(epoch)
-        with torch.autograd.detect_anomaly():
-            for step, sample_batched in enumerate(dataloader.data):
-                optimizer.zero_grad()
-    
-                before_op_time = time.time()
-    
-                image = torch.autograd.Variable(sample_batched['image'].cuda(args.gpu, non_blocking=True))
-                focal = torch.autograd.Variable(sample_batched['focal'].cuda(args.gpu, non_blocking=True))
-                depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
-                K = torch.autograd.Variable(sample_batched['K'].cuda(args.gpu, non_blocking=True))
-    
-                outputs = model(image, focal)
-    
-                pred_depth = outputs['final_depth']
-                pred_shape = outputs['pred_shape']
-                pred_variance = outputs['pred_variance']
-                pred_lambda = outputs['pred_lambda']
-                mask = depth_gt > 1.0
-                mask = mask.to(torch.bool)
-    
-                loss_depth = compute_depth_loss(silog_criterion, pred_depth, depth_gt, mask)
-                loss_shape = compute_shape_loss(normoptizer, pred_shape, K, depth_gt)
-    
-                int_re, lateral_re, intmask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer, intrinsic=K, depth_gt=depth_gt, shape_pred=pred_shape, depth_pred=pred_depth, variance_pred=pred_variance, lambda_pred=pred_lambda)
-                lateralloss = compute_depth_loss(silog_criterion, lateral_re, depth_gt, mask)
-                intloss = compute_depth_loss(silog_criterion, int_re, depth_gt, mask)
-    
-                consistlossx, consistlossy, depthMap_gradx, depthMap_grady, depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = compute_consistence_loss(normoptizer, pred_shape, K, pred_depth, pred_variance, pred_lambda)
-                consistloss = (consistlossx.mean() + consistlossy.mean()) / 2
-    
-                loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw + consistloss * args.consistw
-                # loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw
-                loss.backward()
-    
-                if global_step / num_lrmod_steps <= 1:
-                    for param_group in optimizer.param_groups:
-                        if param_group['name'] != 'shapenet':
-                            current_lr = (args.learning_rate - 0.1 * args.learning_rate) * (1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate
-                        else:
-                            current_lr = (args.learning_rate_shape - 0.1 * args.learning_rate_shape) * (1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate_shape
-                        param_group['lr'] = current_lr
-    
-                if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
-                    print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], lr: {:.12f}, loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, current_lr, loss))
-                    if np.isnan(loss.cpu().item()):
-                        print('NaN in loss occurred. Aborting training.')
-                        continue
-    
-                optimizer.step()
+        # with torch.autograd.detect_anomaly():
+        for step, sample_batched in enumerate(dataloader.data):
+            optimizer.zero_grad()
+
+            before_op_time = time.time()
+
+            image = torch.autograd.Variable(sample_batched['image'].cuda(args.gpu, non_blocking=True))
+            focal = torch.autograd.Variable(sample_batched['focal'].cuda(args.gpu, non_blocking=True))
+            depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
+            K = torch.autograd.Variable(sample_batched['K'].cuda(args.gpu, non_blocking=True))
+            image_org = torch.autograd.Variable(sample_batched['image_org'].cuda(args.gpu, non_blocking=True))
+
+            outputs = model(image, focal)
+
+            pred_depth = outputs['final_depth']
+            pred_shape = outputs['pred_shape']
+            pred_variance = outputs['pred_variance']
+            pred_lambda = outputs['pred_lambda']
+            mask = depth_gt > 1.0
+            mask = mask.to(torch.bool)
+
+            loss_depth = compute_depth_loss(silog_criterion, pred_depth, depth_gt, mask)
+            loss_shape = compute_shape_loss(normoptizer, pred_shape, K, depth_gt)
+
+            int_re, lateral_re, intmask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer, intrinsic=K, depth_gt=depth_gt, shape_pred=pred_shape, depth_pred=pred_depth, variance_pred=pred_variance, lambda_pred=pred_lambda)
+            lateralloss = compute_depth_loss(silog_criterion, lateral_re, depth_gt, mask)
+            intloss = compute_depth_loss(silog_criterion, int_re, depth_gt, mask)
+
+            consistlossx, consistlossy, depthMap_gradx, depthMap_grady, depthMap_gradx_est, depthMap_grady_est, inboundh, inboundv = compute_consistence_loss(normoptizer, pred_shape, K, pred_depth, pred_variance, pred_lambda, image_org)
+            consistloss = (consistlossx.mean() + consistlossy.mean()) / 2
+
+            loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw + consistloss * args.consistw
+            # loss = loss_depth + loss_shape * args.lshapew + (lateralloss + intloss) * args.intw
+            loss.backward()
+
+            if global_step / num_lrmod_steps <= 1:
+                for param_group in optimizer.param_groups:
+                    if param_group['name'] != 'shapenet':
+                        current_lr = (args.learning_rate - 0.1 * args.learning_rate) * (1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate
+                    else:
+                        current_lr = (args.learning_rate_shape - 0.1 * args.learning_rate_shape) * (1 - global_step / num_lrmod_steps) ** 0.9 + 0.1 * args.learning_rate_shape
+                    param_group['lr'] = current_lr
+
+            if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
+                print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], lr: {:.12f}, loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, current_lr, loss))
+                if np.isnan(loss.cpu().item()):
+                    print('NaN in loss occurred. Aborting training.')
+                    continue
+
+            optimizer.step()
 
             duration += time.time() - before_op_time
             if global_step and global_step % args.log_freq == 0 and not model_just_loaded:
@@ -606,20 +610,20 @@ def main_worker(gpu, ngpus_per_node, args):
                     fig_depth_intre = tensor2disp(1/int_re, vmax=0.15, viewind=viewind)
                     fig_depth_intre_norm = tensor2rgb((normoptizer.depth2norm(depthMap=int_re, intrinsic=K) + 1) / 2, isnormed=False)
 
-                    # figgrad_depthx = tensor2grad(depthMap_gradx, pos_bar=0.1, neg_bar=-0.1, viewind=0)
-                    # figgrad_depthy = tensor2grad(depthMap_grady, pos_bar=0.1, neg_bar=-0.1, viewind=0)
-                    # figgrad_depthx_est = tensor2grad(depthMap_gradx_est * inboundh, pos_bar=0.1, neg_bar=-0.1, viewind=0)
-                    # figgrad_depthy_est = tensor2grad(depthMap_grady_est * inboundv, pos_bar=0.1, neg_bar=-0.1, viewind=0)
+                    figgrad_depthx = tensor2grad(depthMap_gradx, pos_bar=0.1, neg_bar=-0.1, viewind=0)
+                    figgrad_depthy = tensor2grad(depthMap_grady, pos_bar=0.1, neg_bar=-0.1, viewind=0)
+                    figgrad_depthx_est = tensor2grad(depthMap_gradx_est * inboundh, pos_bar=0.1, neg_bar=-0.1, viewind=0)
+                    figgrad_depthy_est = tensor2grad(depthMap_grady_est * inboundv, pos_bar=0.1, neg_bar=-0.1, viewind=0)
 
                     figoveiewu = np.concatenate([np.array(fig_rgb), np.array(fignorm)], axis=1)
                     figoveiewd = np.concatenate([np.array(fig_angh), np.array(fig_angv)], axis=1)
                     figoveiewdd = np.concatenate([np.array(fig_depth), np.array(fig_depth_norm)], axis=1)
                     figoveiewddd = np.concatenate([np.array(fig_depth_intre), np.array(fig_depth_intre_norm)], axis=1)
                     figoveiewdddd = np.concatenate([np.array(fig_lambda), np.array(fig_variance)], axis=1)
-                    # figoveiewddddd = np.concatenate([np.array(figgrad_depthx), np.array(figgrad_depthy)], axis=1)
-                    # figoveiewdddddd = np.concatenate([np.array(figgrad_depthx_est), np.array(figgrad_depthy_est)], axis=1)
-                    # figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd, figoveiewddd, figoveiewdddd, figoveiewddddd, figoveiewdddddd], axis=0)
-                    figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd, figoveiewddd, figoveiewdddd], axis=0)
+                    figoveiewddddd = np.concatenate([np.array(figgrad_depthx), np.array(figgrad_depthy)], axis=1)
+                    figoveiewdddddd = np.concatenate([np.array(figgrad_depthx_est), np.array(figgrad_depthy_est)], axis=1)
+                    figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd, figoveiewddd, figoveiewdddd, figoveiewddddd, figoveiewdddddd], axis=0)
+                    # figoveiew = np.concatenate([figoveiewu, figoveiewd, figoveiewdd, figoveiewddd, figoveiewdddd], axis=0)
 
                     writer.add_image('oview', (torch.from_numpy(figoveiew).float() / 255).permute([2, 0, 1]), global_step)
                     if version_num > 1100000000:

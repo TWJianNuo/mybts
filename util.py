@@ -233,6 +233,20 @@ class SurfaceNormalOptimizer(nn.Module):
         self.diffx_sharp_val.weight = nn.Parameter(weightsxval, requires_grad=False)
         self.diffy_sharp_val.weight = nn.Parameter(weightsyval, requires_grad=False)
 
+        rgbgradkx = np.array([[-1, 0, 1],
+                              [-2, 0, 2],
+                              [-1, 0, 1]])
+        rgbgradkx = rgbgradkx / 4 / 2
+        self.rgbgradkx = nn.Conv2d(in_channels=3, out_channels=1, kernel_size=3, stride=1, padding=1, bias=False)
+        self.rgbgradkx.weight = nn.Parameter(torch.from_numpy(rgbgradkx).float().unsqueeze(0).unsqueeze(0).expand([-1, 3, -1, -1]), requires_grad = False)
+
+        rgbgradky = np.array([[-1, -2, -1],
+                              [0, 0, 0],
+                              [1, 2, 1]])
+        rgbgradky = rgbgradky / 4 / 2
+        self.rgbgradky = nn.Conv2d(in_channels=3, out_channels=1, kernel_size=3, stride=1, padding=1, bias=False)
+        self.rgbgradky.weight = nn.Parameter(torch.from_numpy(rgbgradky).float().unsqueeze(0).unsqueeze(0).expand([-1, 3, -1, -1]), requires_grad = False)
+
     def depth2norm(self, depthMap, intrinsic, issharp=True):
         depthMaps = depthMap.squeeze(1)
         fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
@@ -664,17 +678,17 @@ class SurfaceNormalOptimizer(nn.Module):
 
             kx = (((self.yy - by) / fy) ** 2 + 1) * torch.cos(angh) - (self.xx - bx) / fx * torch.sin(angh)
             signx = torch.sign(kx)
-            kx = signx * torch.clamp(torch.abs(kx), min=1e-3, max=1e3)
+            kx = signx * torch.clamp(torch.abs(kx), min=1e-2, max=1e2)
             kx = torch.sin(angh) / kx / fx
 
             ky = (((self.xx - bx) / fx) ** 2 + 1) * torch.cos(angv) - (self.yy - by) / fy * torch.sin(angv)
             signy = torch.sign(ky)
-            ky = signy * torch.clamp(torch.abs(ky), min=1e-3, max=1e3)
+            ky = signy * torch.clamp(torch.abs(ky), min=1e-2, max=1e2)
             ky = torch.sin(angv) / ky / fy
 
-            if torch.sum(torch.isnan(kx)) + torch.sum(torch.isnan(ky)) > 0:
-                print("error detected")
-                return -1
+            # if torch.sum(torch.isnan(kx)) + torch.sum(torch.isnan(ky)) > 0:
+            #     print("error detected")
+            #     return -1
 
         depthMaps = depthMap.squeeze(1)
         depthMap_gradx_est = (depthMaps * kx).unsqueeze(1)
@@ -710,3 +724,8 @@ class SurfaceNormalOptimizer(nn.Module):
             depthMap_grady[depthMap_grady_ind != 2] = 0
 
         return depthMap_gradx, depthMap_grady
+
+    def rgbgradw(self, rgb):
+        rgb_grad = torch.mean(torch.abs(self.rgbgradkx(rgb)) + torch.abs(self.rgbgradky(rgb)), dim=1, keepdim=True)
+        rgb_gradw = torch.exp(-rgb_grad * 5)
+        return rgb_gradw
