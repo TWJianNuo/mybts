@@ -55,8 +55,8 @@ parser.convert_arg_line_to_args = convert_arg_line_to_args
 parser.add_argument('--model_name', type=str, help='model name', default='bts_nyu_v2')
 parser.add_argument('--encoder', type=str, help='type of encoder, vgg or desenet121_bts or densenet161_bts',
                     default='densenet161_bts')
-parser.add_argument('--data_path', type=str, help='path to the data', required=True)
-parser.add_argument('--filenames_file', type=str, help='path to the filenames text file', required=True)
+parser.add_argument('--data_path', type=str, help='path to the data')
+parser.add_argument('--filenames_file', type=str, help='path to the filenames text file')
 parser.add_argument('--input_height', type=int, help='input height', default=480)
 parser.add_argument('--input_width', type=int, help='input width', default=640)
 parser.add_argument('--max_depth', type=float, help='maximum depth in estimation', default=80)
