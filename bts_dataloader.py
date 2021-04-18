@@ -70,7 +70,7 @@ class BtsDataLoader(object):
         
         elif mode == 'test':
             self.testing_samples = DataLoadPreprocess(args, mode, transform=preprocessing_transforms(mode))
-            self.data = DataLoader(self.testing_samples, 1, shuffle=False, num_workers=1)
+            self.data = DataLoader(self.testing_samples, 1, shuffle=False, num_workers=0)
 
         else:
             print('mode should be one of \'train, test, online_eval\'. Got {}'.format(mode))

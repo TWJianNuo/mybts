@@ -141,18 +141,6 @@ if sys.argv.__len__() == 2:
 else:
     args = parser.parse_args()
 
-if args.mode == 'train' and not args.checkpoint_path:
-    from bts import *
-
-elif args.mode == 'train' and args.checkpoint_path:
-    model_dir = os.path.dirname(args.checkpoint_path)
-    model_name = os.path.basename(model_dir)
-    import sys
-    sys.path.append(model_dir)
-    for key, val in vars(__import__(model_name)).items():
-        if key.startswith('__') and key.endswith('__'):
-            continue
-        vars()[key] = val
 
 eval_metrics = ['silog', 'abs_rel', 'log10', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3']
 
@@ -194,6 +182,12 @@ def get_num_lines(file_path):
     f.close()
     return len(lines)
 
+def weights_init_xavier(m):
+    if isinstance(m, nn.Conv2d):
+        torch.nn.init.xavier_uniform_(m.weight)
+        if m.bias is not None:
+            torch.nn.init.zeros_(m.bias)
+
 def colorize(value, vmin=None, vmax=None, cmap='Greys'):
     value = value.cpu().numpy()[:, :, :]
     value = np.log10(value)
@@ -226,6 +220,13 @@ def normalize_result(value, vmin=None, vmax=None):
         value = value * 0.
 
     return np.expand_dims(value, 0)
+
+def bn_init_as_tf(m):
+    if isinstance(m, nn.BatchNorm2d):
+        m.track_running_stats = True  # These two lines enable using stats (moving mean and var) loaded from pretrained model
+        m.eval()                      # or zero mean and variance of one if the batch norm layer has no pretrained values
+        m.affine = True
+        m.requires_grad = True
 
 
 def set_misc(model):

@@ -29,7 +29,6 @@ import torch.nn.utils as utils
 import torchvision.utils as vutils
 import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
-from tensorboardX import SummaryWriter
 from bts_dataloader import *
 
 def convert_arg_line_to_args(arg_line):

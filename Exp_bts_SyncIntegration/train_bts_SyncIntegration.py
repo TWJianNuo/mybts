@@ -141,18 +141,6 @@ if sys.argv.__len__() == 2:
 else:
     args = parser.parse_args()
 
-if args.mode == 'train' and not args.checkpoint_path:
-    from bts import *
-
-elif args.mode == 'train' and args.checkpoint_path:
-    model_dir = os.path.dirname(args.checkpoint_path)
-    model_name = os.path.basename(model_dir)
-    import sys
-    sys.path.append(model_dir)
-    for key, val in vars(__import__(model_name)).items():
-        if key.startswith('__') and key.endswith('__'):
-            continue
-        vars()[key] = val
 
 eval_metrics = ['silog', 'abs_rel', 'log10', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3']
 
@@ -226,6 +214,30 @@ def normalize_result(value, vmin=None, vmax=None):
 
     return np.expand_dims(value, 0)
 
+class silog_loss(nn.Module):
+    def __init__(self, variance_focus):
+        super(silog_loss, self).__init__()
+        self.variance_focus = variance_focus
+
+    def forward(self, depth_est, depth_gt, mask):
+        d = torch.log(depth_est[mask]) - torch.log(depth_gt[mask])
+        return torch.sqrt((d ** 2).mean() - self.variance_focus * (d.mean() ** 2)) * 10.0
+
+
+def weights_init_xavier(m):
+    if isinstance(m, nn.Conv2d):
+        if m.weight.requires_grad == True:
+            torch.nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                torch.nn.init.zeros_(m.bias)
+
+
+def bn_init_as_tf(m):
+    if isinstance(m, nn.BatchNorm2d):
+        m.track_running_stats = True  # These two lines enable using stats (moving mean and var) loaded from pretrained model
+        m.eval()                      # or zero mean and variance of one if the batch norm layer has no pretrained values
+        m.affine = True
+        m.requires_grad = True
 
 def set_misc(model):
     if args.bn_no_track_stats:
@@ -530,6 +542,9 @@ def main_worker(gpu, ngpus_per_node, args):
             pred_lambda = outputs['pred_lambda']
             mask = depth_gt > 1.0
             mask = mask.to(torch.bool)
+
+            # print(pred_depth.shape)
+            # tensor2disp(1 / pred_depth, vmax=0.15, viewind=0).show()
 
             loss_depth = compute_depth_loss(silog_criterion, pred_depth, depth_gt, mask)
             loss_shape = compute_shape_loss(normoptizer, pred_shape, K, depth_gt)

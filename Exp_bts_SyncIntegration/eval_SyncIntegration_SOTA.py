@@ -155,6 +155,7 @@ def online_eval(model, normoptizer_eval, crfIntegrater, dataloader_eval, gpu, vl
             pred_depth = torch.from_numpy(pred_depth).unsqueeze(0).unsqueeze(0).cuda()
             pred_depth[torch.isinf(pred_depth)] = args.max_depth_eval
             pred_depth[torch.isnan(pred_depth)] = args.min_depth_eval
+
             int_re, lateral_re, intmask = compute_intre(integrater=crfIntegrater, normoptizer=normoptizer_eval, intrinsic=K, depth_gt=gt_depth,
                                                         shape_pred=outputs['pred_shape'], depth_pred=pred_depth, variance_pred=outputs['pred_variance'], lambda_pred=outputs['pred_lambda'])
 
@@ -305,7 +306,9 @@ def compute_intre(integrater, normoptizer, intrinsic, depth_gt, shape_pred, dept
     mask[:, :, 0:100, :] = 0
     mask = mask.int().contiguous()
 
-    lateral_re = integrater.compute_lateralre(pred_log=pred_log, mask=mask, variance=variance_pred, depthin=depth_pred)
+    lateral_re = depth_pred
+    for i in range(2):
+        lateral_re = integrater.compute_lateralre(pred_log=pred_log, mask=mask, variance=variance_pred, depthin=lateral_re)
     int_re = depth_pred * (1 - lambda_pred) + lateral_re * lambda_pred
     return int_re, lateral_re, mask
 
