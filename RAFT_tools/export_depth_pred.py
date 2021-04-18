@@ -201,6 +201,8 @@ def remove_dup(entries):
 
     removed = list(set(dupentry))
     removed.sort()
+    import random
+    random.shuffle(removed)
     return removed
 
 def export(args, evaluation_entries, istrain=False):
