@@ -219,7 +219,7 @@ def test(args):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
     # if not args.istest
-    jitterparam = 0.92
+    jitterparam = 0.87
     photo_aug = ColorJitter(brightness=jitterparam, contrast=jitterparam, saturation=jitterparam, hue=jitterparam / 3.14)
 
     print('now testing {} files with {}'.format(len(evaluation_entries), args.checkpoint_path))
@@ -228,6 +228,7 @@ def test(args):
     with torch.no_grad():
         for t_idx, entry in enumerate(tqdm(evaluation_entries)):
             seq, index, _ = entry.split(' ')
+            torch.manual_seed(int(index))
 
             imgpath = os.path.join(args.data_path, seq, 'image_02', 'data', "{}.png".format(str(index).zfill(10)))
             if os.path.exists(imgpath):

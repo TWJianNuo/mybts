@@ -257,7 +257,7 @@ def export(gpuid, model, args, ngpus_per_node, evaluation_entries, istrain=False
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
     if istrain:
-        jitterparam = 0.92
+        jitterparam = 0.87
         photo_aug = ColorJitter(brightness=jitterparam, contrast=jitterparam, saturation=jitterparam, hue=jitterparam / 3.14)
 
     print("Initialize Instance on Gpu %d, from %d to %d, total %d" % (gpuid, stidx, edidx, len(evaluation_entries)))
@@ -265,6 +265,7 @@ def export(gpuid, model, args, ngpus_per_node, evaluation_entries, istrain=False
     with torch.no_grad():
         for t_idx, entry in enumerate(tqdm(evaluation_entries[stidx : edidx])):
             seq, index = entry.split(' ')
+            torch.manual_seed(int(index))
 
             export_fold = os.path.join(args.exportroot, seq, 'image_02')
             os.makedirs(export_fold, exist_ok=True)
