@@ -218,6 +218,7 @@ def test(args):
 
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
+    # if not args.istest
     jitterparam = 0.92
     photo_aug = ColorJitter(brightness=jitterparam, contrast=jitterparam, saturation=jitterparam, hue=jitterparam / 3.14)
 

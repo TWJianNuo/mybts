@@ -103,7 +103,7 @@ def get_odomentries(args):
             odomentries.append("{} {} {}".format(odomseq, imgname.rstrip('.png'), 'l'))
     return odomentries
 
-def read_splits(args, istrain):
+def read_splits(args, istrain, iseval):
     split_root = os.path.join(project_rootdir, 'RAFT_tools/splits')
     train_entries = [x.rstrip('\n') for x in open(os.path.join(split_root, 'train_files.txt'), 'r')]
     evaluation_entries = [x.rstrip('\n') for x in open(os.path.join(split_root, 'test_files.txt'), 'r')]
@@ -124,6 +124,8 @@ def read_splits(args, istrain):
                 entry_expand = "{} {} {}".format(fold, frmidx.zfill(10), 'l')
                 train_entries_expand.append(entry_expand)
         return train_entries_expand
+    elif iseval:
+        return evaluation_entries
     else:
         return evaluation_entries + odom_entries
 
@@ -238,6 +240,7 @@ def export(gpuid, model, args, ngpus_per_node, evaluation_entries, istrain=False
     torch.cuda.set_device(args.gpu)
     model.cuda(args.gpu)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+    model.eval()
 
     loc = 'cuda:{}'.format(args.gpu)
     checkpoint = torch.load(args.checkpoint_path, map_location=loc)
@@ -303,12 +306,61 @@ def export(gpuid, model, args, ngpus_per_node, evaluation_entries, istrain=False
 
     return
 
+def get_num_lines(file_path):
+    f = open(file_path, 'r')
+    lines = f.readlines()
+    f.close()
+    return lines
+
+def evaluation():
+    evaluation_entries = get_num_lines(args.filenames_file)
+    print('now testing {} files with {}'.format(len(evaluation_entries), args.checkpoint_path))
+
+    metrics = list()
+    countnum = 0
+    for t_idx, sample in enumerate(tqdm(evaluation_entries)):
+        gt_depth_path = os.path.join(args.gt_path, evaluation_entries[t_idx].split(' ')[1])
+        pred_depth_path = os.path.join(args.exportroot, evaluation_entries[t_idx].split(' ')[1])
+        if os.path.exists(gt_depth_path):
+            gt_depth = cv2.imread(gt_depth_path, -1)
+            gt_depth = gt_depth.astype(np.float32) / 256.0
+
+            # Predict
+
+            pred_depth = cv2.imread(pred_depth_path, -1)
+            pred_depth = pred_depth.astype(np.float32) / 256.0
+
+            pred_depth[pred_depth < args.min_depth_eval] = args.min_depth_eval
+            pred_depth[pred_depth > args.max_depth_eval] = args.max_depth_eval
+            pred_depth[np.isinf(pred_depth)] = args.max_depth_eval
+            pred_depth[np.isnan(pred_depth)] = args.min_depth_eval
+
+            valid_mask = np.logical_and(gt_depth > args.min_depth_eval, gt_depth < args.max_depth_eval)
+
+            gt_height, gt_width = gt_depth.shape
+            eval_mask = np.zeros(valid_mask.shape)
+            eval_mask[int(0.40810811 * gt_height):int(0.99189189 * gt_height), int(0.03594771 * gt_width):int(0.96405229 * gt_width)] = 1
+
+            valid_mask = np.logical_and(valid_mask, eval_mask)
+
+            metric = compute_errors(gt_depth[valid_mask], pred_depth[valid_mask])
+            metrics.append(metric)
+            countnum += 1
+
+    metrics = np.stack(metrics, axis=0)
+    metrics = np.mean(metrics, axis=0)
+
+    print("{:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}".format('silog', 'log10', 'abs_rel', 'rms', 'sq_rel', 'log_rms', 'd1', 'd2', 'd3'))
+    for i in range(8):
+        print('{:7.3f}, '.format(metrics[i]), end='')
+    print('{:7.3f}'.format(metrics[8]))
 
 if __name__ == '__main__':
     ngpus_per_node = torch.cuda.device_count()
 
     model = BtsModel(params=args)
-    eval_entries = read_splits(args, istrain=False)
     train_entries = read_splits(args, istrain=True)
-    mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(eval_entries), False))
     mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(train_entries), True))
+    eval_entries = read_splits(args, istrain=False)
+    mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(eval_entries), False))
+    evaluation()
