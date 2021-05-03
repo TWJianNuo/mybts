@@ -72,7 +72,7 @@ parser.add_argument('--save_lpg', help='if set, save outputs from lpg layers', a
 parser.add_argument('--bts_size', type=int, help='initial num_filters in bts', default=512)
 parser.add_argument('--usesyncnorm', help='if set, save outputs from lpg layers', action='store_true')
 parser.add_argument('--istest', help='if set, save outputs from lpg layers', action='store_true')
-parser.add_argument('--trainonly', help='if set, save outputs from lpg layers', action='store_true')
+parser.add_argument('--evalonly', help='if set, save outputs from lpg layers', action='store_true')
 
 parser.add_argument('--gt_path', type=str)
 parser.add_argument('--exportroot', type=str)
@@ -358,9 +358,12 @@ def evaluation():
 if __name__ == '__main__':
     ngpus_per_node = torch.cuda.device_count()
 
-    model = BtsModel(params=args)
-    train_entries = read_splits(args, istrain=True)
-    mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(train_entries), True))
-    eval_entries = read_splits(args, istrain=False)
-    mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(eval_entries), False))
-    evaluation()
+    if args.evalonly:
+        evaluation()
+    else:
+        model = BtsModel(params=args)
+        train_entries = read_splits(args, istrain=True)
+        mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(train_entries), True))
+        eval_entries = read_splits(args, istrain=False)
+        mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(eval_entries), False))
+        evaluation()
