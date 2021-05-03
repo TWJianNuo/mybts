@@ -103,7 +103,7 @@ def get_odomentries(args):
             odomentries.append("{} {} {}".format(odomseq, imgname.rstrip('.png'), 'l'))
     return odomentries
 
-def read_splits(args, istrain, iseval):
+def read_splits(args, istrain, iseval=False):
     split_root = os.path.join(project_rootdir, 'RAFT_tools/splits')
     train_entries = [x.rstrip('\n') for x in open(os.path.join(split_root, 'train_files.txt'), 'r')]
     evaluation_entries = [x.rstrip('\n') for x in open(os.path.join(split_root, 'test_files.txt'), 'r')]
