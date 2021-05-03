@@ -265,7 +265,7 @@ def export(gpuid, model, args, ngpus_per_node, evaluation_entries, istrain=False
     with torch.no_grad():
         for t_idx, entry in enumerate(tqdm(evaluation_entries[stidx : edidx])):
             seq, index = entry.split(' ')
-            torch.manual_seed(int(index))
+            torch.manual_seed(int(t_idx))
 
             export_fold = os.path.join(args.exportroot, seq, 'image_02')
             os.makedirs(export_fold, exist_ok=True)
@@ -327,7 +327,6 @@ def evaluation():
             gt_depth = gt_depth.astype(np.float32) / 256.0
 
             # Predict
-
             pred_depth = cv2.imread(pred_depth_path, -1)
             pred_depth = pred_depth.astype(np.float32) / 256.0
 
