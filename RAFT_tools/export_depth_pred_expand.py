@@ -346,7 +346,8 @@ def evaluation():
             metric = compute_errors(gt_depth[valid_mask], pred_depth[valid_mask])
             metrics.append(metric)
             countnum += 1
-
+        else:
+            print("%s missing" % gt_depth_path)
     metrics = np.stack(metrics, axis=0)
     metrics = np.mean(metrics, axis=0)
 
