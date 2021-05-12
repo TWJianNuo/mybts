@@ -88,6 +88,7 @@ class KittiDataset(Dataset):
 
         if mode == 'train':
             self.data_path = self.args.data_path
+            self.data_path_odom = self.args.data_path_odom
             self.gt_path = self.args.gt_path
             self.crop_flip = T.AugmentationList([
                 T.RandomCrop(crop_type='absolute', crop_size=[self.args.input_height, self.args.input_width]),
@@ -95,6 +96,7 @@ class KittiDataset(Dataset):
 
         elif mode == 'online_eval':
             self.data_path = self.args.data_path_eval
+            self.data_path_odom = self.args.data_path_odom
             self.gt_path = self.args.gt_path_eval
 
     def filter_file(self):
@@ -107,11 +109,16 @@ class KittiDataset(Dataset):
     def __getitem__(self, idx):
         sample_path = self.filenames[idx]
 
+        if os.path.exists(os.path.join(self.data_path, sample_path.split()[0])):
+            data_path = self.data_path
+        else:
+            data_path = self.data_path_odom
+
         # Read Intrinsic
-        K = self.get_intrinsic(os.path.join(self.data_path, sample_path.split(' ')[0].split('/')[0], 'calib_cam_to_cam.txt'))
+        K = self.get_intrinsic(os.path.join(data_path, sample_path.split(' ')[0].split('/')[0], 'calib_cam_to_cam.txt'))
 
         # Read RGB
-        image = self.get_rgb(os.path.join(self.data_path, sample_path.split()[0]))
+        image = self.get_rgb(os.path.join(data_path, sample_path.split()[0]))
 
         # Read Depth
         depth_gt = self.get_depth(os.path.join(self.gt_path, sample_path.split()[1]))
