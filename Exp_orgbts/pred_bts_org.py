@@ -146,7 +146,7 @@ def get_num_lines(file_path):
 def online_eval(model, dataloader_eval, gpu, vlsroot):
     eval_measures_depth = torch.zeros(10).cuda(device=gpu)
     eval_measures_depth_garg = torch.zeros(10).cuda(device=gpu)
-    for idx, eval_sample_batched in enumerate((dataloader_eval.data)):
+    for idx, eval_sample_batched in enumerate(tqdm(dataloader_eval.data)):
         with torch.no_grad():
             image = torch.autograd.Variable(eval_sample_batched['image'].cuda(gpu, non_blocking=True))
             focal = torch.autograd.Variable(eval_sample_batched['focal'].cuda(gpu, non_blocking=True))
@@ -193,7 +193,7 @@ def online_eval(model, dataloader_eval, gpu, vlsroot):
         eval_measures_depth_garg[:9] += torch.tensor(measures_depth_garg).cuda(device=gpu)
         eval_measures_depth_garg[9] += 1
 
-        print("%d finished" % idx)
+        # print("%d finished" % idx)
 
     eval_measures_depth[0:9] = eval_measures_depth[0:9] / eval_measures_depth[9]
     eval_measures_depth = eval_measures_depth.cpu().numpy()
@@ -250,12 +250,14 @@ def main_worker(gpu, ngpus_per_node, args):
     args.gpu = gpu
     args.distributed = False
 
+    checkpoint = torch.load(os.path.join(args.checkpoint_path))
+
     # Create model
     model = BtsModeOrg(args)
     model = torch.nn.DataParallel(model)
+    # print(model.state_dict().keys())
+    # print(checkpoint['model'].keys())
     model.cuda()
-
-    checkpoint = torch.load(os.path.join(args.checkpoint_path))
     model.load_state_dict(checkpoint['model'])
 
     cudnn.benchmark = True
