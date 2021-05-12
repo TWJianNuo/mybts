@@ -246,7 +246,7 @@ def set_misc(model):
         for name2, parameters in child.named_parameters():
             if any(x in name2 for x in fixing_layers):
                 parameters.requires_grad = False
-                print("{}-{} frozen".format(name, name2))
+                # print("{}-{} frozen".format(name, name2))
 
 def online_eval(model, dataloader_eval, gpu, ngpus):
     eval_measures = torch.zeros(10).cuda(device=gpu)
@@ -351,6 +351,8 @@ def main_worker(gpu, ngpus_per_node, args):
         print("Model Initialized on GPU: {}".format(args.gpu))
     else:
         print("Model Initialized")
+
+    print("Batchsize is %d" % args.batch_size)
 
     global_step = 0
     best_eval_measures_lower_better = torch.zeros(6).cpu() + 1e3
