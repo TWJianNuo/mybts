@@ -210,11 +210,8 @@ def main_worker(gpu, ngpus_per_node, args):
     cudnn.benchmark = True
 
     dataloader_eval = BtsDataLoader(args, 'online_eval')
-    predroot = os.path.join('/media/shengjie/disk1/visualization/btspred', args.checkpoint_path.split('/')[-2])
-    os.makedirs(predroot, exist_ok=True)
-
     model.eval()
-    online_eval(model=model, dataloader_eval=dataloader_eval, gpu=gpu, vlsroot=predroot)
+    online_eval(model=model, dataloader_eval=dataloader_eval, gpu=gpu, vlsroot=None)
 
 if __name__ == '__main__':
     args = parser.parse_args()
