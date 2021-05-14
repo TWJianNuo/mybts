@@ -204,7 +204,7 @@ def evaluation():
         seq, index = sample.split(' ')
         index = int(index)
         gt_depth_path = os.path.join(args.data_path, seq, 'sync_depth_{}.png'.format(str(index).zfill(5)))
-        pred_depth_path = os.path.join(args.exportroot, seq, 'sync_depth_{}.png'.format(str(index).zfill(5)))
+        pred_depth_path = os.path.join(args.exportroot, str(0).zfill(3), seq, 'sync_depth_{}.png'.format(str(index).zfill(5)))
         if os.path.exists(gt_depth_path):
             gt_depth = cv2.imread(gt_depth_path, -1)
             gt_depth = gt_depth.astype(np.float32) / 1000.0
@@ -238,7 +238,7 @@ def evaluation():
         print('{:7.3f}, '.format(metrics[i]), end='')
     print('{:7.3f}'.format(metrics[8]))
 
-def export(args, evaluation_entries, istrain=False):
+def export(args, evaluation_entries, istrain=False, iter=0):
     """Test function."""
     torch.manual_seed(1234)
     np.random.seed(1234)
@@ -266,11 +266,11 @@ def export(args, evaluation_entries, istrain=False):
 
     with torch.no_grad():
         for t_idx, entry in enumerate(tqdm(evaluation_entries)):
-            torch.manual_seed(int(t_idx))
+            torch.manual_seed(int(t_idx) + len(eval_entries) * iter)
             seq, index = entry.split(' ')
             index = int(index)
 
-            export_fold = os.path.join(args.exportroot, seq)
+            export_fold = os.path.join(args.exportroot, str(iter).zfill(3), seq)
             os.makedirs(export_fold, exist_ok=True)
             export_path = os.path.join(export_fold, 'sync_depth_{}.png'.format(str(index).zfill(5)))
 
@@ -297,8 +297,9 @@ def export(args, evaluation_entries, istrain=False):
 
 if __name__ == '__main__':
     eval_entries = read_splits(args, istrain=False)
-    export(args, eval_entries, istrain=False)
-    evaluation()
-
     train_entries = read_splits(args, istrain=True)
-    export(args, train_entries, istrain=True)
+    
+    export(args, eval_entries, istrain=False, iter=0)
+    evaluation()
+    for k in range(3):
+        export(args, train_entries, istrain=True, iter=k)
