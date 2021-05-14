@@ -298,7 +298,7 @@ def export(args, evaluation_entries, istrain=False, iter=0):
 if __name__ == '__main__':
     eval_entries = read_splits(args, istrain=False)
     train_entries = read_splits(args, istrain=True)
-    
+
     export(args, eval_entries, istrain=False, iter=0)
     evaluation()
     for k in range(3):
