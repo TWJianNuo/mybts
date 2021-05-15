@@ -41,6 +41,7 @@ from bts import BtsModel
 
 from util import *
 from torchvision.transforms import ColorJitter
+import torch.multiprocessing as mp
 
 def convert_arg_line_to_args(arg_line):
     for arg in arg_line.split():
@@ -238,22 +239,36 @@ def evaluation():
         print('{:7.3f}, '.format(metrics[i]), end='')
     print('{:7.3f}'.format(metrics[8]))
 
-def export(args, evaluation_entries, istrain=False, iter=0):
+def export(gpuid, model, args, ngpus_per_node, evaluation_entries, istrain=False, iter=0):
     """Test function."""
     torch.manual_seed(1234)
     np.random.seed(1234)
     random.seed(1234)
 
     args.mode = 'test'
-    args.num_threads = 0
+    args.gpu = gpuid
+    args.dist_backend = 'nccl'
+    args.dist_url = 'tcp://127.0.0.1:1234'
+    args.world_size = ngpus_per_node
+    args.rank = gpuid
 
-    model = BtsModel(params=args)
-    model = torch.nn.DataParallel(model)
-
-    checkpoint = torch.load(args.checkpoint_path)
-    model.load_state_dict(checkpoint['model'])
+    dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
+    torch.cuda.set_device(args.gpu)
+    model.cuda(args.gpu)
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
     model.eval()
-    model.cuda()
+
+    loc = 'cuda:{}'.format(args.gpu)
+    checkpoint = torch.load(args.checkpoint_path, map_location=loc)
+    model.load_state_dict(checkpoint['model'])
+
+    interval = np.floor(len(evaluation_entries) / ngpus_per_node).astype(np.int).item()
+    if gpuid == ngpus_per_node - 1:
+        stidx = int(interval * gpuid)
+        edidx = len(evaluation_entries)
+    else:
+        stidx = int(interval * gpuid)
+        edidx = int(interval * (gpuid + 1))
 
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
@@ -262,11 +277,11 @@ def export(args, evaluation_entries, istrain=False, iter=0):
         brightparam = 1.00
         photo_aug = ColorJitter(brightness=brightparam, contrast=brightparam, saturation=jitterparam, hue=jitterparam / 3.14)
 
-    print('now testing {} files with {}'.format(len(evaluation_entries), args.checkpoint_path))
+    print("Initialize Instance on Gpu %d, from %d to %d, total %d" % (gpuid, stidx, edidx, len(evaluation_entries)))
 
     with torch.no_grad():
-        for t_idx, entry in enumerate(tqdm(evaluation_entries)):
-            torch.manual_seed(int(t_idx) + len(eval_entries) * iter)
+        for t_idx, entry in enumerate(tqdm(evaluation_entries[stidx : edidx])):
+            torch.manual_seed(int(t_idx + stidx) + len(evaluation_entries) * iter)
             seq, index = entry.split(' ')
             index = int(index)
 
@@ -298,8 +313,9 @@ def export(args, evaluation_entries, istrain=False, iter=0):
 if __name__ == '__main__':
     eval_entries = read_splits(args, istrain=False)
     train_entries = read_splits(args, istrain=True)
-
-    export(args, eval_entries, istrain=False, iter=0)
+    model = BtsModel(params=args)
+    ngpus_per_node = torch.cuda.device_count()
+    mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, (eval_entries), False, 0))
     evaluation()
     for k in range(3):
-        export(args, train_entries, istrain=True, iter=k)
+        mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, (train_entries), True, k))
