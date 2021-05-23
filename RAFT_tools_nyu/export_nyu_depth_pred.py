@@ -291,7 +291,7 @@ def export(gpuid, model, args, ngpus_per_node, evaluation_entries, istrain=False
 
             imgpath = os.path.join(args.data_path, seq, 'rgb_{}.png'.format(str(index).zfill(5)))
             if not os.path.exists(imgpath):
-                imgpath.replace('.png', '.jpg')
+                imgpath = imgpath.replace('.png', '.jpg')
 
             image = Image.open(imgpath)
             if istrain:
