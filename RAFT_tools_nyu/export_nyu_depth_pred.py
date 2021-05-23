@@ -85,8 +85,8 @@ else:
 
 def read_splits(args, istrain):
     split_root = os.path.join(project_rootdir, 'RAFT_tools_nyu/splits')
-    train_entries = [x.rstrip('\n') for x in open(os.path.join(split_root, 'nyudepthv2_train_files.txt'), 'r')]
-    evaluation_entries = [x.rstrip('\n') for x in open(os.path.join(split_root, 'nyudepthv2_test_files.txt'), 'r')]
+    train_entries = [x.rstrip('\n') for x in open(os.path.join(split_root, 'nyudepthv2_organized_train_files.txt'), 'r')]
+    evaluation_entries = [x.rstrip('\n') for x in open(os.path.join(split_root, 'nyudepthv2_organized_test_files.txt'), 'r')]
 
     if istrain:
         return train_entries
@@ -196,7 +196,7 @@ def get_num_lines(file_path):
     return lines
 
 def evaluation():
-    evaluation_entries = get_num_lines('RAFT_tools_nyu/splits/nyudepthv2_test_files.txt')
+    evaluation_entries = get_num_lines('RAFT_tools_nyu/splits/nyudepthv2_organized_test_files.txt')
     print('now testing {} files with {}'.format(len(evaluation_entries), args.checkpoint_path))
 
     metrics = list()
@@ -274,7 +274,7 @@ def export(gpuid, model, args, ngpus_per_node, evaluation_entries, istrain=False
 
     if istrain:
         jitterparam = 1.5
-        brightparam = 1.00
+        brightparam = 0.95
         photo_aug = ColorJitter(brightness=brightparam, contrast=brightparam, saturation=jitterparam, hue=jitterparam / 3.14)
 
     print("Initialize Instance on Gpu %d, from %d to %d, total %d" % (gpuid, stidx, edidx, len(evaluation_entries)))
@@ -289,7 +289,9 @@ def export(gpuid, model, args, ngpus_per_node, evaluation_entries, istrain=False
             os.makedirs(export_fold, exist_ok=True)
             export_path = os.path.join(export_fold, 'sync_depth_{}.png'.format(str(index).zfill(5)))
 
-            imgpath = os.path.join(args.data_path, seq, 'rgb_{}.jpg'.format(str(index).zfill(5)))
+            imgpath = os.path.join(args.data_path, seq, 'rgb_{}.png'.format(str(index).zfill(5)))
+            if not os.path.exists(imgpath):
+                imgpath.replace('.png', '.jpg')
 
             image = Image.open(imgpath)
             if istrain:

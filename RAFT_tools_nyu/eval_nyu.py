@@ -113,9 +113,9 @@ def test(args):
     args.num_threads = 0
 
     if not args.test_train_aug:
-        args.filenames_file = os.path.join(project_rootdir, 'RAFT_tools_nyu/splits/nyudepthv2_test_files_with_gt.txt')
+        args.filenames_file = os.path.join(project_rootdir, 'RAFT_tools_nyu/splits/nyudepthv2_organized_test_files.txt')
     else:
-        args.filenames_file = os.path.join(project_rootdir, 'RAFT_tools_nyu/splits/nyudepthv2_train_files_with_gt.txt')
+        args.filenames_file = os.path.join(project_rootdir, 'RAFT_tools_nyu/splits/nyudepthv2_organized_train_files.txt')
 
     model = BtsModel(params=args)
     model = torch.nn.DataParallel(model)
@@ -129,7 +129,7 @@ def test(args):
 
     if args.test_train_aug:
         jitterparam = 1.5
-        brightparam = 1.00
+        brightparam = 0.95
         photo_aug = ColorJitter(brightness=brightparam, contrast=brightparam, saturation=jitterparam, hue=jitterparam / 3.14)
 
     if not args.test_train_aug:
@@ -147,11 +147,11 @@ def test(args):
     with torch.no_grad():
         for t_idx, entry in enumerate(tqdm(evaluation_entries)):
             torch.manual_seed(int(t_idx))
-            if not args.test_train_aug:
-                imgpath = os.path.join(args.data_path, entry.split(' ')[0])
-            else:
-                imgpath = args.data_path + entry.split(' ')[0]
-
+            seq, frmidx = entry.rstrip().split(' ')
+            imgpath = os.path.join(args.data_path, seq, "rgb_{}.png".format(frmidx))
+            gt_depth_path = os.path.join(args.data_path, seq, "sync_depth_{}.png".format(frmidx))
+            if not os.path.exists(imgpath):
+                imgpath = imgpath.replace('.png', '.jpg')
             image = Image.open(imgpath)
 
             if args.test_train_aug:
@@ -164,11 +164,6 @@ def test(args):
             image = normalize(torch.from_numpy(image).permute([2, 0, 1])).unsqueeze(0)
             image = Variable(image.float().cuda())
 
-            if not args.test_train_aug:
-                gt_depth_path = os.path.join(args.data_path, entry.split(' ')[1])
-            else:
-                gt_depth_path = args.data_path + entry.split(' ')[1]
-
             focal = Variable(torch.from_numpy(np.array(float(entry.split(' ')[-1]))).unsqueeze(0).cuda())
 
             if os.path.exists(gt_depth_path):
@@ -179,17 +174,10 @@ def test(args):
                 lpg8x8, lpg4x4, lpg2x2, reduc1x1, depth_est = model(image, focal)
 
                 pred_depth = depth_est.squeeze().cpu().numpy()
-                # if args.do_kb_crop:
-                #     height, width = gt_depth.shape
-                #     top_margin = int(height - 352)
-                #     left_margin = int((width - 1216) / 2)
-                #     pred_depth_uncropped = np.zeros((height, width), dtype=np.float32)
-                #     pred_depth_uncropped[top_margin:top_margin + 352, left_margin:left_margin + 1216] = pred_depth
-                #     pred_depth = pred_depth_uncropped
 
-                if args.test_train_aug:
-                    image_vls = np.concatenate([np.array(image_vls), np.array(tensor2disp(depth_est, percentile=95, viewind=0))], axis=0)
-                    Image.fromarray(image_vls).save(os.path.join('/media/shengjie/disk1/visualization/nyuv2_img_aug_vls', str(t_idx).zfill(5) + '.png'))
+                # if args.test_train_aug:
+                #     image_vls = np.concatenate([np.array(image_vls), np.array(tensor2disp(depth_est, percentile=95, viewind=0))], axis=0)
+                #     Image.fromarray(image_vls).save(os.path.join('/media/shengjie/disk1/visualization/nyuv2_img_aug_vls', str(t_idx).zfill(5) + '.png'))
 
                 pred_depth[pred_depth < args.min_depth_eval] = args.min_depth_eval
                 pred_depth[pred_depth > args.max_depth_eval] = args.max_depth_eval
