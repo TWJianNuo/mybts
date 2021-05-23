@@ -82,17 +82,19 @@ parser.add_argument('--do_kb_crop',                            help='if set, cro
 parser.add_argument('--use_right',                             help='if set, will randomly use right images when train on KITTI', action='store_true')
 
 # Multi-gpu training
-parser.add_argument('--num_threads',               type=int,   help='number of threads to use for data loading', default=1)
+parser.add_argument('--num_threads',               type=int,   help='number of threads to use for data loading', default=0)
 parser.add_argument('--gpu',                       type=int,   help='GPU id to use.', default=None)
 # Online eval
-parser.add_argument('--data_path_eval',            type=str,   help='path to the data for online evaluation', required=False)
-parser.add_argument('--gt_path_eval',              type=str,   help='path to the groundtruth data for online evaluation', required=False)
-parser.add_argument('--filenames_file_eval',       type=str,   help='path to the filenames text file for online evaluation', required=False)
+parser.add_argument('--data_path',            type=str,   help='path to the data for online evaluation', required=False)
+parser.add_argument('--gt_path',              type=str,   help='path to the groundtruth data for online evaluation', required=False)
+parser.add_argument('--filenames_file',       type=str,   help='path to the filenames text file for online evaluation', required=False)
 parser.add_argument('--min_depth_eval',            type=float, help='minimum depth for evaluation', default=1e-3)
 parser.add_argument('--max_depth_eval',            type=float, help='maximum depth for evaluation', default=80)
 parser.add_argument('--eigen_crop',                            help='if set, crops according to Eigen NIPS14', action='store_true')
 parser.add_argument('--garg_crop',                             help='if set, crops according to Garg  ECCV16', action='store_true')
 parser.add_argument('--num_threads_eval',          type=int,   default=0)
+parser.add_argument('--batch_size',          type=int,   default=1)
+
 
 # Integration
 parser.add_argument("--inttimes",                  type=int,     default=1)
@@ -209,7 +211,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     cudnn.benchmark = True
 
-    dataloader_eval = BtsDataLoader(args, 'online_eval')
+    dataloader_eval = BtsDataLoader(args, 'train')
     model.eval()
     online_eval(model=model, dataloader_eval=dataloader_eval, gpu=gpu, vlsroot=None)
 
