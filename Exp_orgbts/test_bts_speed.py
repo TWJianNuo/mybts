@@ -152,6 +152,9 @@ def online_eval(model, dataloader_eval, gpu, vlsroot):
     for idx, eval_sample_batched in enumerate(dataloader_eval.data):
         with torch.no_grad():
             image = eval_sample_batched['image'].cuda(gpu, non_blocking=True)
+            assert image.shape[0] == 1
+            assert image.shape[2] == 192
+            assert image.shape[3] == 1088
             focal = eval_sample_batched['focal'].cuda(gpu, non_blocking=True)
 
             st = time.time()
