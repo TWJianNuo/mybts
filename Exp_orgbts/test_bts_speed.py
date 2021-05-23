@@ -39,7 +39,6 @@ import time
 
 from Exp_orgbts.bts import BtsModeOrg
 from Exp_orgbts.bts_dataloader import BtsDataLoader
-from integrationModule import CRFIntegrationModule
 from util import *
 
 version_num = torch.__version__
