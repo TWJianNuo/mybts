@@ -42,6 +42,7 @@ from bts import BtsModel
 from util import *
 from torchvision.transforms import ColorJitter
 import torch.multiprocessing as mp
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 def convert_arg_line_to_args(arg_line):
     for arg in arg_line.split():
