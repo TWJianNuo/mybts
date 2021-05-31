@@ -340,5 +340,5 @@ if __name__ == '__main__':
     ngpus_per_node = torch.cuda.device_count()
     model = BtsModel(params=args)
     train_entries = read_splits(args)
-    # mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(train_entries)))
+    mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(train_entries)))
     evaluation()
