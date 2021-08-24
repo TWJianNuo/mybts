@@ -356,9 +356,9 @@ if __name__ == '__main__':
     if args.evalonly:
         evaluation()
     else:
-        # model = BtsModel(params=args)
-        # train_entries = read_splits(args, istrain=True)
-        # mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(train_entries), True))
-        # eval_entries = read_splits(args, istrain=False)
-        # mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(eval_entries), False))
+        model = BtsModel(params=args)
+        train_entries = read_splits(args, istrain=True)
+        mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(train_entries), True))
+        eval_entries = read_splits(args, istrain=False)
+        mp.spawn(export, nprocs=ngpus_per_node, args=(model, args, ngpus_per_node, remove_dup(eval_entries), False))
         evaluation()
