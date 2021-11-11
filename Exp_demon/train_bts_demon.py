@@ -107,7 +107,7 @@ parser.add_argument('--multiprocessing_distributed',           help='Use multi-p
 parser.add_argument('--do_online_eval',                        help='if set, perform online eval in every eval_freq steps', action='store_true')
 parser.add_argument('--min_depth_eval',            type=float, help='minimum depth for evaluation', default=0.1)
 parser.add_argument('--max_depth_eval',            type=float, help='maximum depth for evaluation', default=100)
-parser.add_argument('--eval_freq',                 type=int,   help='Online evaluation frequency in global steps', default=500)
+parser.add_argument('--eval_freq',                 type=int,   help='Online evaluation frequency in global steps', default=2000)
 parser.add_argument('--num_threads_eval',          type=int,   default=2)
 
 args = parser.parse_args()
@@ -358,11 +358,6 @@ def main_worker(gpu, ngpus_per_node, args):
                     # Image.fromarray(figoveiew).show()
 
                     writer.add_image('oview', (torch.from_numpy(figoveiew).float() / 255).permute([2, 0, 1]), global_step)
-
-            if not args.do_online_eval and global_step and global_step % args.save_freq == 0:
-                if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
-                    checkpoint = {'model': model.state_dict()}
-                    torch.save(checkpoint, args.log_directory + '/' + args.model_name + '/model-{}'.format(global_step))
 
             if args.do_online_eval and global_step % args.eval_freq == 0:
                 time.sleep(0.1)
