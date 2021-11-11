@@ -356,7 +356,7 @@ def main_worker(gpu, ngpus_per_node, args):
                     fig_rgb[outrange_sel, 0] = fig_rgb[outrange_sel, 0] * 0.5 + 255.0 * 0.5
 
                     figoveiew = np.concatenate([fig_rgb, fig_gt, fig_depth], axis=0)
-                    Image.fromarray(figoveiew).show()
+                    # Image.fromarray(figoveiew).show()
 
                     writer.add_image('oview', (torch.from_numpy(figoveiew).float() / 255).permute([2, 0, 1]), global_step)
 
