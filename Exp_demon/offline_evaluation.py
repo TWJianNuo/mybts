@@ -35,8 +35,8 @@ import matplotlib.cm
 from tqdm import tqdm
 from util import *
 
-from Exp_demon.bts import BtsModeOrg
-from Exp_demon.bts_dataloader_banmvs import BtsDataLoader
+from Exp_demon.bts_smoothl1 import BtsModeOrg
+from Exp_demon.bts_dataloader import BtsDataLoader
 import numpy as np
 
 cudnn.benchmark = True
@@ -66,7 +66,7 @@ parser.add_argument('--encoder',                   type=str,   help='type of enc
 parser.add_argument('--demon_path',                 type=str,   help='path to the data', required=True)
 parser.add_argument('--input_height',              type=int,   help='input height', default=416)
 parser.add_argument('--input_width',               type=int,   help='input width',  default=544)
-parser.add_argument('--max_depth',                 type=float, help='maximum depth in estimation', default=10)
+parser.add_argument('--max_depth',                 type=float, help='maximum depth in estimation', default=100)
 
 # Log and save
 parser.add_argument('--log_directory',             type=str,   help='directory to save checkpoints and summaries', default='')
@@ -106,7 +106,7 @@ parser.add_argument('--multiprocessing_distributed',           help='Use multi-p
 # Online eval
 parser.add_argument('--do_online_eval',                        help='if set, perform online eval in every eval_freq steps', action='store_true')
 parser.add_argument('--min_depth_eval',            type=float, help='minimum depth for evaluation', default=0.1)
-parser.add_argument('--max_depth_eval',            type=float, help='maximum depth for evaluation', default=10)
+parser.add_argument('--max_depth_eval',            type=float, help='maximum depth for evaluation', default=100)
 parser.add_argument('--eval_freq',                 type=int,   help='Online evaluation frequency in global steps', default=2000)
 parser.add_argument('--num_threads_eval',          type=int,   default=2)
 
@@ -203,18 +203,33 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
             _, _, _, _, pred_depth = model(image)
             pred_depth = pred_depth.cpu().numpy().squeeze()
             gt_depth = gt_depth.cpu().numpy().squeeze()
+
         entry = eval_sample_batched['entry'][0][0]
         datasetname = entry.split(' ')[0].split('_')[0]
+
+        gt_depth_ref = np.load(os.path.join('/media/shengjie/disk1/Prediction/EvidentDepthCVPR22/DeMoN/DeepSFMTest_pr', 'gt', "{}.npy".format(entry.replace(' ', '_'))))
+        max_diff = np.abs(gt_depth - gt_depth_ref).max()
+        assert max_diff < 1e-1
+
+        pred_depth_ref = np.load(os.path.join('/media/shengjie/disk1/Prediction/EvidentDepthCVPR22/DeMoN/DeepSFMTest_pr', 'pr', "{}.npy".format(entry.replace(' ', '_'))))
+        pred_depth = pred_depth_ref
+        # val1 = gt_depth_ref > 0
+        # val2 = gt_depth > 0
+        # diffval = np.sum(val1.astype(np.float) - val2.astype(np.float))
+
+
+        # tensor2disp(1 / torch.from_numpy(gt_depth_ref).unsqueeze(0).unsqueeze(0), vmax=1, viewind=0).show()
+        # tensor2disp(1 / torch.from_numpy(gt_depth).unsqueeze(0).unsqueeze(0), vmax=1, viewind=0).show()
+        # gt_depth_ref_f = gt_depth_ref[gt_depth_ref > 0]
+        # gt_depth_f = gt_depth[gt_depth > 0]
+        # compute_errors(gt_depth_ref_f, gt_depth_f)
 
         pred_depth[pred_depth < args.min_depth_eval] = args.min_depth_eval
         pred_depth[pred_depth > args.max_depth_eval] = args.max_depth_eval
         pred_depth[np.isinf(pred_depth)] = args.max_depth_eval
         pred_depth[np.isnan(pred_depth)] = args.min_depth_eval
 
-        if 'mvs' not in datasetname:
-            valid_mask = np.logical_and(gt_depth > args.min_depth_eval, gt_depth < args.max_depth_eval)
-        else:
-            valid_mask = np.logical_and(gt_depth > args.min_depth_eval, gt_depth < 100)
+        valid_mask = np.logical_and(gt_depth > args.min_depth_eval, gt_depth < args.max_depth_eval)
 
         measures = compute_errors(gt_depth[valid_mask], pred_depth[valid_mask])
 
@@ -273,123 +288,13 @@ def main_worker(gpu, ngpus_per_node, args):
     print("Model Initialized on GPU: {}".format(args.gpu))
     print("Batchsize is %d" % args.batch_size)
 
-    global_step = 0
-    best_scinv = {'sun3d': 1e10,
-                 'rgbd': 1e10,
-                 'scenes11': 1e10,
-                 'mvs': 1e10
-                 }
-
-    # Training parameters
-    optimizer = torch.optim.AdamW([{'params': model.module.encoder.parameters(), 'weight_decay': args.weight_decay},
-                                   {'params': model.module.decoder.parameters(), 'weight_decay': 0}], lr=args.learning_rate, eps=args.adam_eps)
-
     if args.checkpoint_path != '':
         print("Loading checkpoint '{}'".format(args.checkpoint_path))
         loc = 'cuda:{}'.format(args.gpu)
         model.load_state_dict(torch.load(args.checkpoint_path, map_location=loc)['model'])
 
-    dataloader = BtsDataLoader(args, is_test=False)
     dataloader_eval = BtsDataLoader(args, is_test=True)
-
-    # Logging
-    if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
-        writer = SummaryWriter(os.path.join(args.log_directory, args.model_name, 'summaries'), flush_secs=30)
-
-    silog_criterion = silog_loss(variance_focus=args.variance_focus)
-
-    end_learning_rate = args.end_learning_rate if args.end_learning_rate != -1 else 0.1 * args.learning_rate
-
-    defaul_max_epoch = 50
-
-    epoch = 0
-    steps_per_epoch = np.ceil(dataloader.demon.__len__() / args.batch_size).astype(np.int32)
-    num_total_steps = defaul_max_epoch * steps_per_epoch
-    while epoch < args.num_epochs:
-
-        if args.distributed:
-            dataloader.train_sampler.set_epoch(epoch)
-
-        for step, sample_batched in enumerate(dataloader.data):
-            optimizer.zero_grad()
-
-            image = torch.autograd.Variable(sample_batched['image'].cuda(args.gpu, non_blocking=True))
-            depth_gt = torch.autograd.Variable(sample_batched['depth'].cuda(args.gpu, non_blocking=True))
-
-            lpg8x8, lpg4x4, lpg2x2, reduc1x1, depth_est = model(image)
-
-            mask = (depth_gt > 0) * (depth_gt < args.max_depth)
-
-            loss = silog_criterion.forward(depth_est, depth_gt, mask.to(torch.bool))
-            loss.backward()
-            for param_group in optimizer.param_groups:
-                current_lr = (args.learning_rate - end_learning_rate) * (1 - global_step / num_total_steps) ** 0.9 + end_learning_rate
-                if current_lr < end_learning_rate:
-                    current_lr = end_learning_rate
-                param_group['lr'] = current_lr
-
-            optimizer.step()
-
-            if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0 and global_step % args.log_freq == 0):
-                print('[epoch][s/s_per_e/gs]: [{}][{}/{}/{}], lr: {:.12f}, loss: {:.12f}'.format(epoch, step, steps_per_epoch, global_step, current_lr, loss))
-                if np.isnan(loss.cpu().item()):
-                    print('NaN in loss occurred. Aborting training.')
-                    return -1
-
-            if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
-                writer.add_scalar('Train/silog_loss', loss, global_step)
-                writer.add_scalar('Train/learning_rate', current_lr, global_step)
-
-            if global_step % args.log_freq == 0:
-                if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
-                    viewind = 0
-                    # vlsmax = (torch.sum(depth_gt[viewind] * mask[viewind]) / (torch.sum(mask[viewind]) + 1)).item()
-                    # vlsmax = np.percentile(depth_gt[viewind][mask[viewind]].cpu().numpy(), 0.95)
-                    depth_gt_ = torch.clone(depth_gt)
-                    depth_gt_[depth_gt_ == 0] = 1e10
-
-                    outrange_sel = mask[viewind].squeeze().cpu().numpy() == 0
-
-                    fig_gt = tensor2disp(1 / depth_gt_, vmax=1, viewind=viewind)
-                    fig_rgb = tensor2rgb(sample_batched['image'], viewind=viewind)
-                    fig_depth = tensor2disp(1 / depth_est, vmax=1, viewind=viewind)
-
-                    fig_rgb = np.array(fig_rgb)
-                    fig_rgb[outrange_sel, 0] = fig_rgb[outrange_sel, 0] * 0.5 + 255.0 * 0.5
-
-                    figoveiew = np.concatenate([fig_rgb, fig_gt, fig_depth], axis=0)
-                    # Image.fromarray(figoveiew).show()
-
-                    writer.add_image('oview', (torch.from_numpy(figoveiew).float() / 255).permute([2, 0, 1]), global_step)
-
-            if args.do_online_eval and global_step % args.eval_freq == 0:
-                time.sleep(0.1)
-                model.eval()
-                eval_measures = online_eval(model, dataloader_eval, gpu, ngpus_per_node)
-                if eval_measures is not None:
-                    for keyy in eval_measures.keys():
-                        for i in range(10):
-                            writer.add_scalar("Test/{}_{}".format(keyy, eval_metrics[i]), eval_measures[keyy][i].cpu(), int(global_step))
-
-                        if best_scinv[keyy] > eval_measures[keyy][9]:
-                            best_scinv[keyy] = eval_measures[keyy][9]
-
-                            model_save_name = 'model_scinv_{}.pth'.format(keyy)
-                            checkpoint = {'model': model.state_dict()}
-                            os.makedirs(os.path.join(args.log_directory, args.model_name), exist_ok=True)
-                            torch.save(checkpoint, os.path.join(args.log_directory, args.model_name, model_save_name))
-                            print("Model {} saved".format(model_save_name))
-
-                    print('Best scinv - sun3d: %f, rgbd: %f, scenes11: %f, mvs: %f' % (best_scinv['sun3d'], best_scinv['rgbd'], best_scinv['scenes11'], best_scinv['mvs']))
-
-                model.train()
-                block_print()
-                set_misc(model)
-                enable_print()
-
-            global_step += 1
-
-        epoch += 1
+    eval_measures = online_eval(model, dataloader_eval, gpu, ngpus_per_node)
 
 
 def main():
