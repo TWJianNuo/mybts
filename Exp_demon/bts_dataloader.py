@@ -65,17 +65,34 @@ class DeMoN(Dataset):
                      'mvs': 0
                      }
 
+
         self.entries = list()
         for seq in glob(os.path.join(self.args.demon_path, self.split, '*/')):
             jpgpaths = glob(os.path.join(seq, '*.jpg'))
             for idx in range(len(jpgpaths)):
                 self.entries.append("{} {}".format(seq.split('/')[-2], str(idx)))
-            catcounts[seq.split('/')[-2].split('_')[0]] += len(jpgpaths)
+
+        if not self.is_test:
+            mvsentries = list()
+            for seq in glob(os.path.join(self.args.demon_path, self.split, '*/')):
+                jpgpaths = glob(os.path.join(seq, '*.jpg'))
+                for idx in range(len(jpgpaths)):
+                    if 'mvs' == seq.split('/')[-2].split('_')[0]:
+                        mvsentries.append("{} {}".format(seq.split('/')[-2], str(idx)))
+            self.entries = self.entries + mvsentries * 3
+
+        for entry in self.entries:
+            catcounts[entry.split(' ')[0].split('_')[0]] += 1
 
         if not is_test:
             self.crop_flip = T.AugmentationList([
                 T.RandomCrop(crop_type='absolute', crop_size=[self.args.input_height, self.args.input_width]),
                 T.RandomFlip(prob=0.5, horizontal=True)])
+
+        print("Dataset Samples: sun3d: %d, rgbd: %d, scenes11: %d, mvs: %d" % (catcounts['sun3d'], catcounts['rgbd'], catcounts['scenes11'], catcounts['mvs']))
+
+        random.seed(2022)
+        random.shuffle(self.entries)
 
     def __getitem__(self, idx):
         entry = self.entries[idx]
@@ -93,10 +110,6 @@ class DeMoN(Dataset):
         depth_gt = np.load(os.path.join(self.root, self.split, seqname, "{}.npy".format(str(jpgidx).zfill(4))))
         depth_gt[np.isnan(depth_gt)] = 0
         depth_gt[np.isinf(depth_gt)] = 0
-
-        datasetname = seqname.split('_')[0]
-        if datasetname == 'scenes11':
-            depth_gt = depth_gt / 5
 
         # Read Size
         size = np.array(image.size)

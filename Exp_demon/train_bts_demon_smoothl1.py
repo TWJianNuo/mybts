@@ -35,7 +35,7 @@ import matplotlib.cm
 from tqdm import tqdm
 from util import *
 
-from Exp_demon.bts import BtsModeOrg
+from Exp_demon.bts_smoothl1 import BtsModeOrg
 from Exp_demon.bts_dataloader import BtsDataLoader
 import numpy as np
 
@@ -318,7 +318,8 @@ def main_worker(gpu, ngpus_per_node, args):
 
             mask = (depth_gt > 0) * (depth_gt < args.max_depth)
 
-            loss = silog_criterion.forward(depth_est, depth_gt, mask.to(torch.bool))
+            loss = F.smooth_l1_loss(depth_est[mask], depth_gt[mask], size_average=True)
+
             loss.backward()
             for param_group in optimizer.param_groups:
                 current_lr = (args.learning_rate - end_learning_rate) * (1 - global_step / num_total_steps) ** 0.9 + end_learning_rate

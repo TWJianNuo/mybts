@@ -25,6 +25,7 @@ if __name__ == '__main__':
     sun3dentries = list()
     scenes11entries = list()
     rgbdentries = list()
+    mvsentries = list()
     for seq in glob.glob(os.path.join(demon_path, 'train', '*/')):
         if 'scenes11' in seq:
             # if 'sun3d' not in seq:
@@ -40,7 +41,10 @@ if __name__ == '__main__':
             jpgpaths = glob.glob(os.path.join(seq, '*.jpg'))
             for idx in range(len(jpgpaths)):
                 rgbdentries.append("{} {}".format(seq.split('/')[-2], str(idx)))
-
+        elif 'mvs' in seq:
+            jpgpaths = glob.glob(os.path.join(seq, '*.jpg'))
+            for idx in range(len(jpgpaths)):
+                mvsentries.append("{} {}".format(seq.split('/')[-2], str(idx)))
     samplenum = 500
 
     random.shuffle(scenes11entries)
@@ -49,6 +53,8 @@ if __name__ == '__main__':
     sun3dentries = sun3dentries[0:samplenum]
     random.shuffle(rgbdentries)
     rgbdentries = rgbdentries[0:samplenum]
+    random.shuffle(mvsentries)
+    mvsentries = mvsentries[0:samplenum]
 
     # scenes11entries.append('scenes11_train_19547 0')
     # scenes11entries = scenes11entries[::-1]
@@ -87,18 +93,35 @@ if __name__ == '__main__':
     # plt.hist(sun3dlist, density=True, bins=50)  # density=False would make counts
     # plt.show()
 
-    rgbdlist = list()
-    for entry in rgbdentries:
+    # rgbdlist = list()
+    # for entry in rgbdentries:
+    #     seqname, jpgidx = entry.split(' ')
+    #     depth_gt = np.load(os.path.join(demon_path, 'train', seqname, "{}.npy".format(str(jpgidx).zfill(4))))
+    #     depth_gt[np.isnan(depth_gt)] = 0
+    #     depth_gt[np.isinf(depth_gt)] = 0
+    #     selector = (depth_gt > 0)
+    #
+    #     rgbdlist.append(depth_gt[selector])
+    #
+    # rgbdlist = np.concatenate(rgbdlist)
+    #
+    # plt.figure()
+    # plt.hist(rgbdlist, density=True, bins=50)  # density=False would make counts
+    # plt.show()
+
+    mvslist = list()
+    for entry in mvsentries:
         seqname, jpgidx = entry.split(' ')
         depth_gt = np.load(os.path.join(demon_path, 'train', seqname, "{}.npy".format(str(jpgidx).zfill(4))))
         depth_gt[np.isnan(depth_gt)] = 0
         depth_gt[np.isinf(depth_gt)] = 0
         selector = (depth_gt > 0)
 
-        rgbdlist.append(depth_gt[selector])
+        # mvslist.append(depth_gt[selector])
+        mvslist.append(np.array([depth_gt[selector].mean()]))
 
-    rgbdlist = np.concatenate(rgbdlist)
+    mvslist = np.concatenate(mvslist)
 
     plt.figure()
-    plt.hist(rgbdlist, density=True, bins=50)  # density=False would make counts
+    plt.hist(mvslist, density=True, bins=50)  # density=False would make counts
     plt.show()
