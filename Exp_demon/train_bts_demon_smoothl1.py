@@ -342,7 +342,8 @@ def main_worker(gpu, ngpus_per_node, args):
             if global_step % args.log_freq == 0:
                 if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
                     viewind = 0
-                    vlsmax = (torch.sum(depth_gt[viewind] * mask[viewind]) / (torch.sum(mask[viewind]) + 1)).item()
+                    # vlsmax = (torch.sum(depth_gt[viewind] * mask[viewind]) / (torch.sum(mask[viewind]) + 1)).item()
+                    vlsmax = np.percentile(depth_gt[viewind][mask[viewind]].cpu().numpy(), 0.95)
                     depth_gt_ = torch.clone(depth_gt)
                     depth_gt_[depth_gt_ == 0] = 1e10
 

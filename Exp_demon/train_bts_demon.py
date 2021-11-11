@@ -341,21 +341,22 @@ def main_worker(gpu, ngpus_per_node, args):
             if global_step % args.log_freq == 0:
                 if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
                     viewind = 0
-                    vlsmax = (torch.sum(depth_gt[viewind] * mask[viewind]) / (torch.sum(mask[viewind]) + 1)).item()
+                    # vlsmax = (torch.sum(depth_gt[viewind] * mask[viewind]) / (torch.sum(mask[viewind]) + 1)).item()
+                    vlsmax = np.percentile(depth_gt[viewind][mask[viewind]].cpu().numpy(), 0.95)
                     depth_gt_ = torch.clone(depth_gt)
                     depth_gt_[depth_gt_ == 0] = 1e10
 
                     outrange_sel = mask[viewind].squeeze().cpu().numpy() == 0
 
-                    fig_gt = tensor2disp(1 / depth_gt_, vmax=vlsmax * 2, viewind=viewind)
+                    fig_gt = tensor2disp(1 / depth_gt_, vmax=vlsmax, viewind=viewind)
                     fig_rgb = tensor2rgb(sample_batched['image'], viewind=viewind)
-                    fig_depth = tensor2disp(1 / depth_est, vmax=vlsmax * 2, viewind=viewind)
+                    fig_depth = tensor2disp(1 / depth_est, vmax=vlsmax, viewind=viewind)
 
                     fig_rgb = np.array(fig_rgb)
                     fig_rgb[outrange_sel, 0] = fig_rgb[outrange_sel, 0] * 0.5 + 255.0 * 0.5
 
                     figoveiew = np.concatenate([fig_rgb, fig_gt, fig_depth], axis=0)
-                    # Image.fromarray(figoveiew).show()
+                    Image.fromarray(figoveiew).show()
 
                     writer.add_image('oview', (torch.from_numpy(figoveiew).float() / 255).permute([2, 0, 1]), global_step)
 
