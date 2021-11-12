@@ -24,12 +24,10 @@ from PIL import Image
 from glob import glob
 
 from distributed_sampler_no_evenly_divisible import *
-from fvcore.transforms.transform import CropTransform
 
 import torch.utils.data.distributed
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
-from transforms.augmentation import _transform_to_aug
 
 class BtsDataLoader(object):
     def __init__(self, args, is_test=True):
@@ -65,21 +63,11 @@ class DeMoN(Dataset):
                      'mvs': 0
                      }
 
-
         self.entries = list()
         for seq in glob(os.path.join(self.args.demon_path, self.split, '*/')):
             jpgpaths = glob(os.path.join(seq, '*.jpg'))
             for idx in range(len(jpgpaths)):
                 self.entries.append("{} {}".format(seq.split('/')[-2], str(idx)))
-
-        if not self.is_test:
-            mvsentries = list()
-            for seq in glob(os.path.join(self.args.demon_path, self.split, '*/')):
-                jpgpaths = glob(os.path.join(seq, '*.jpg'))
-                for idx in range(len(jpgpaths)):
-                    if 'mvs' == seq.split('/')[-2].split('_')[0]:
-                        mvsentries.append("{} {}".format(seq.split('/')[-2], str(idx)))
-            self.entries = self.entries + mvsentries * 3
 
         for entry in self.entries:
             catcounts[entry.split(' ')[0].split('_')[0]] += 1
@@ -110,6 +98,8 @@ class DeMoN(Dataset):
         depth_gt = np.load(os.path.join(self.root, self.split, seqname, "{}.npy".format(str(jpgidx).zfill(4))))
         depth_gt[np.isnan(depth_gt)] = 0
         depth_gt[np.isinf(depth_gt)] = 0
+        if 'scenes11' in seqname:
+            depth_gt = depth_gt / 5
 
         # Read Size
         size = np.array(image.size)
