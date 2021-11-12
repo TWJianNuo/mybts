@@ -257,8 +257,6 @@ def align_mvs(depth_est, depth_gt, entry):
         for idx, e in enumerate(entry[0]):
             if not ('mvs' == e.split('_')[0]):
                 scale_term[idx] = 1
-            else:
-                print("MVS captured {}.".format(e))
     return depth_est * scale_term
 
 def main_worker(gpu, ngpus_per_node, args):
