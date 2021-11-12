@@ -252,8 +252,8 @@ class silog_loss(nn.Module):
 
 def align_mvs(depth_est, depth_gt, entry):
     with torch.no_grad():
-        mask = (depth_gt > 0) * (depth_gt < args.max_depth)
-        scale_term = torch.mean(depth_gt * mask, dim=[2, 3], keepdim=True) / torch.mean(depth_est * mask, dim=[2, 3], keepdim=True)
+        mask = (depth_gt > 0) * (depth_gt < 100)
+        scale_term = torch.mean(depth_gt * mask, dim=[2, 3], keepdim=True) / (torch.mean(depth_est * mask, dim=[2, 3], keepdim=True) +1e-10)
         for idx, e in enumerate(entry[0]):
             if not ('mvs' == e.split('_')[0]):
                 scale_term[idx] = 1
