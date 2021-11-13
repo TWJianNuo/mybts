@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__)))) 
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.backends.cudnn as cudnn
-from torch.utils.tensorboard import SummaryWriter
+import torch
 
 from tqdm import tqdm
 from util import *
@@ -64,8 +64,9 @@ parser.add_argument('--multiprocessing_distributed',           help='Use multi-p
                                                                     'multi node data parallel training', action='store_true',)
 # Online eval
 parser.add_argument('--min_depth_eval',            type=float, help='minimum depth for evaluation', default=0.1)
-parser.add_argument('--max_depth_eval',            type=float, help='maximum depth for evaluation', default=100)
+parser.add_argument('--max_depth_eval',            type=float, help='maximum depth for evaluation', default=10)
 parser.add_argument('--split',                     type=str, required=True)
+parser.add_argument('--export_root',               type=str, required=True)
 
 args = parser.parse_args()
 
@@ -116,7 +117,13 @@ def online_eval(model, dataloader_eval, gpu, ngpus, entrynum):
             pred_depth[np.isnan(pred_depth)] = args.min_depth_eval
 
         for k in range(pred_depth.shape[0]):
-            valid_mask = np.logical_and(gt_depth[k] > args.min_depth_eval, gt_depth[k] < args.max_depth_eval)
+            datasetentry = eval_sample_batched['entry'][0][k].split(' ')[0].split('_')[0]
+            if datasetentry == 'scenes11':
+                valid_mask = np.logical_and(gt_depth[k] > args.min_depth_eval, gt_depth[k] < 50)
+            elif datasetentry == 'mvs':
+                valid_mask = np.logical_and(gt_depth[k] > args.min_depth_eval, gt_depth[k] < 100)
+            else:
+                valid_mask = np.logical_and(gt_depth[k] > args.min_depth_eval, gt_depth[k] < 10)
 
             measures = compute_errors(gt_depth[k][valid_mask], pred_depth[k][valid_mask])
 
@@ -125,19 +132,59 @@ def online_eval(model, dataloader_eval, gpu, ngpus, entrynum):
 
     if args.multiprocessing_distributed:
         group = dist.new_group([i for i in range(ngpus)])
-        for k in eval_measures.keys():
-            dist.all_reduce(tensor=eval_measures[k], op=dist.ReduceOp.SUM, group=group)
+        dist.all_reduce(tensor=eval_measures, op=dist.ReduceOp.SUM, group=group)
 
     if not args.multiprocessing_distributed or gpu == 0:
-        eval_measures_cpu_dict = dict()
-        for k in eval_measures.keys():
-            eval_measures_cpu = eval_measures[k].cpu()
-            cnt = eval_measures_cpu[10].item()
-            eval_measures_cpu /= cnt
+        eval_measures_cpu = eval_measures.cpu()
+        cnt = eval_measures_cpu[10].item()
+        eval_measures_cpu[0:10] /= cnt
 
-            assert entrynum == cnt
-        return eval_measures_cpu
-    return None
+        assert entrynum == cnt
+    return eval_measures_cpu
+
+def online_generation(model, dataloader_eval, gpu, ss):
+    scale_list = list()
+    for _, eval_sample_batched in enumerate(tqdm(dataloader_eval.data)):
+        with torch.no_grad():
+            image = torch.autograd.Variable(eval_sample_batched['image'].cuda(gpu, non_blocking=True))
+            gt_depth = eval_sample_batched['depth']
+            _, _, _, _, pred_depth = model(image)
+
+            pred_depth = pred_depth.cpu().numpy().squeeze(1)
+            gt_depth = gt_depth.cpu().numpy().squeeze(1)
+
+            pred_depth[np.isinf(pred_depth)] = args.max_depth_eval
+            pred_depth[np.isnan(pred_depth)] = args.min_depth_eval
+
+        for k in range(pred_depth.shape[0]):
+            datasetentry = eval_sample_batched['entry'][0][k].split(' ')[0].split('_')[0]
+            if datasetentry == 'scenes11':
+                valid_mask = np.logical_and(gt_depth[k] > args.min_depth_eval, gt_depth[k] < 50)
+            elif datasetentry == 'mvs':
+                valid_mask = np.logical_and(gt_depth[k] > args.min_depth_eval, gt_depth[k] < 100)
+            else:
+                valid_mask = np.logical_and(gt_depth[k] > args.min_depth_eval, gt_depth[k] < 10)
+
+            assert np.sum(valid_mask) > 10, print("Invalid Groundtruth")
+
+            scale = np.sum(gt_depth[k][valid_mask]) / np.sum(pred_depth[k][valid_mask])
+
+            pred_depth_sv = pred_depth[k] * scale
+            pred_depth_sv = np.clip(pred_depth_sv, a_min=0.1, a_max=100)
+
+            svfold = os.path.join(args.export_root, ss, eval_sample_batched['entry'][0][k].split(' ')[0])
+            os.makedirs(svfold, exist_ok=True)
+
+            pred_depth_sv = pred_depth_sv * 256.0
+            pred_depth_sv = pred_depth_sv.astype(np.uint16)
+            svpath = os.path.join(svfold, "{}.png".format(eval_sample_batched['entry'][0][k].split(' ')[1].zfill(4)))
+            Image.fromarray(pred_depth_sv).save(svpath)
+
+            # pred_depth_sv_ck = np.array(Image.open(svpath)).astype(np.float32)
+            # pred_depth_sv_ck = pred_depth_sv_ck / 256.0
+
+            scale_list.append(scale)
+    return scale_list
 
 class silog_loss(nn.Module):
     def __init__(self, variance_focus):
@@ -167,7 +214,6 @@ def main_worker(gpu, ngpus_per_node, args):
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
 
     print("Model Initialized on GPU: {}".format(args.gpu))
-    print("Batchsize is %d" % args.batch_size)
 
     args.checkpoint_path = os.path.join(args.checkpoint_path, "model_scinv_{}.pth".format(args.split))
     if args.checkpoint_path != '':
@@ -175,22 +221,47 @@ def main_worker(gpu, ngpus_per_node, args):
         loc = 'cuda:{}'.format(args.gpu)
         model.load_state_dict(torch.load(args.checkpoint_path, map_location=loc)['model'])
 
-    dataloader_eval = BtsDataLoader(args, args.split, batch_size=8, num_workers=0, jitterparam=0, is_test=True, verbose=True)
+    dataloader_eval = BtsDataLoader(args, args.split, batch_size=8, num_workers=0, jitterparam=0, is_test=True, verbose=True, islimit=True)
     eval_measures_cpu = online_eval(model, dataloader_eval, gpu, ngpus_per_node, entrynum=dataloader_eval.demon.__len__())
 
     if gpu == 0:
-        a = 1
-        print('Dataset: {}, Computing errors for {} eval samples'.format(k, int(cnt)))
-        print("{:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}, {:>7}".format('abs_rel', 'abs_diff', 'sq_rel',
-                                                                                            'rmse', 'rmse_log', 'a1', 'a2',
-                                                                                            'a3', 'l1_inv', 'sc_inv'))
-        for i in range(9):
-            print('{:7.3f}, '.format(eval_measures_cpu[i]), end='')
-        print('{:7.3f}'.format(eval_measures_cpu[9]))
+        print("Split: %s, Counts: %d, abs_rel: %f, abs_diff: %f, a1: %f, l1_inv: %f, sc_inv: %f" % (args.split, eval_measures_cpu[10], eval_measures_cpu[0], eval_measures_cpu[1], eval_measures_cpu[5], eval_measures_cpu[8], eval_measures_cpu[9]))
 
-    for jitterparam in np.linspace(0, 2, 20):
-        dataloader_train = BtsDataLoader(args.demon_path, args.split, jitterparam=jitterparam, is_test=False, verbose=False)
-        eval_measures_cpu = online_eval(model, dataloader_train, gpu, ngpus_per_node)
+    train_scinv_aug = list()
+    train_measures_cpu_rec = list()
+    jitterparams = np.linspace(0, 1.2, 12)
+
+    if args.split in ['sun3d', 'rgbd']:
+        for jitterparam in jitterparams:
+            dataloader_train = BtsDataLoader(args, args.split, batch_size=8, num_workers=2, jitterparam=jitterparam, is_test=False, verbose=False, islimit=True)
+            train_measures_cpu = online_eval(model, dataloader_train, gpu, ngpus_per_node, entrynum=dataloader_train.demon.__len__())
+            if gpu == 0:
+                print("Split: %s, Aug: %f, Counts: %d, abs_rel: %f, abs_diff: %f, a1: %f, l1_inv: %f, sc_inv: %f" % (args.split, jitterparam, train_measures_cpu[10], train_measures_cpu[0], train_measures_cpu[1], train_measures_cpu[5], train_measures_cpu[8], train_measures_cpu[9]))
+            train_scinv_aug.append(train_measures_cpu[9])
+            train_measures_cpu_rec.append(train_measures_cpu)
+
+        train_scinv_aug = np.array(train_scinv_aug)
+        opt_jitterparam = np.argmin(np.abs(train_scinv_aug - eval_measures_cpu[9]))
+
+        if gpu == 0:
+            train_measures_cpu = train_measures_cpu_rec[opt_jitterparam]
+            print("====================================================================================================")
+            print("Split: %s, Counts: %d, abs_rel: %f, abs_diff: %f, a1: %f, l1_inv: %f, sc_inv: %f" % (args.split, eval_measures_cpu[10], eval_measures_cpu[0], eval_measures_cpu[1], eval_measures_cpu[5], eval_measures_cpu[8], eval_measures_cpu[9]))
+            print("Split: %s, Aug: %f, Counts: %d, abs_rel: %f, abs_diff: %f, a1: %f, l1_inv: %f, sc_inv: %f" % (args.split, jitterparams[opt_jitterparam], train_measures_cpu[10], train_measures_cpu[0], train_measures_cpu[1], train_measures_cpu[5], train_measures_cpu[8], train_measures_cpu[9]))
+    else:
+        opt_jitterparam = 0
+
+    dataloader_generation_test = BtsDataLoader(args, args.split, batch_size=8, num_workers=4, jitterparam=0, is_test=True, verbose=True, islimit=False)
+    online_generation(model, dataloader_generation_test, gpu, ss='test')
+
+    dataloader_generation_train = BtsDataLoader(args, args.split, batch_size=8, num_workers=4, jitterparam=jitterparams[opt_jitterparam], is_test=False, verbose=True, islimit=False)
+    scale_list = online_generation(model, dataloader_generation_train, gpu, ss='train')
+    scale_list = np.array(scale_list)
+
+    plt.figure()
+    plt.hist(scale_list, bins=20)
+    plt.savefig(os.path.join(args.export_root, "{}.png".format(args.split)))
+    plt.close()
 
 
 def main():

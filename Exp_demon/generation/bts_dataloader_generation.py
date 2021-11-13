@@ -31,18 +31,19 @@ from torchvision.transforms import ColorJitter
 from torch.utils.data import Dataset, DataLoader
 
 class BtsDataLoader(object):
-    def __init__(self, args, subset, jitterparam, batch_size, num_workers, is_test=True, verbose=False):
-        self.demon = DeMoN(args.demon_path, args, subset, jitterparam, is_test, verbose)
+    def __init__(self, args, subset, jitterparam, batch_size, num_workers, is_test=True, verbose=False, islimit=False):
+        self.demon = DeMoN(args.demon_path, args, subset, jitterparam, is_test, verbose, islimit)
         self.eval_sampler = DistributedSamplerNoEvenlyDivisible(self.demon, shuffle=False) if args.distributed else None
         self.data = DataLoader(self.demon, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, sampler=self.eval_sampler, drop_last=False)
 
 class DeMoN(Dataset):
-    def __init__(self, root, args, subset, jitterparam, istest, verbose=False):
+    def __init__(self, root, args, subset, jitterparam, istest, verbose=False, islimit=False):
         self.args = args
         self.root = root
         self.color_normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         self.subset = subset
 
+        self.islimit = islimit
         self.is_test = istest
         if self.is_test:
             self.split = 'test'
@@ -59,7 +60,7 @@ class DeMoN(Dataset):
         random.seed(2022)
         random.shuffle(self.entries)
 
-        if not self.is_test:
+        if not self.is_test and self.islimit:
             self.entries = self.entries[0:500]
 
         if verbose:
