@@ -32,8 +32,12 @@ from torch.utils.data import Dataset, DataLoader
 class BtsDataLoader(object):
     def __init__(self, args, is_test=True):
         self.demon = DeMoN(args.demon_path, args, is_test)
-        self.eval_sampler = DistributedSamplerNoEvenlyDivisible(self.demon, shuffle=False) if args.distributed else None
-        self.data = DataLoader(self.demon, 1, shuffle=False, num_workers=1, pin_memory=True, sampler=self.eval_sampler, drop_last=False)
+        if not is_test:
+            self.train_sampler = torch.utils.data.distributed.DistributedSampler(self.demon) if args.distributed else None
+            self.data = DataLoader(self.demon, args.batch_size, shuffle=(self.train_sampler is None), num_workers=args.num_threads, pin_memory=True, sampler=self.train_sampler, drop_last=True)
+        else:
+            self.eval_sampler = DistributedSamplerNoEvenlyDivisible(self.demon, shuffle=False) if args.distributed else None
+            self.data = DataLoader(self.demon, 1, shuffle=False, num_workers=1, pin_memory=True, sampler=self.eval_sampler, drop_last=False)
 
 
 class DeMoN(Dataset):
