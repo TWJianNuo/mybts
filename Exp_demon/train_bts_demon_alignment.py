@@ -106,7 +106,7 @@ parser.add_argument('--multiprocessing_distributed',           help='Use multi-p
 # Online eval
 parser.add_argument('--do_online_eval',                        help='if set, perform online eval in every eval_freq steps', action='store_true')
 parser.add_argument('--min_depth_eval',            type=float, help='minimum depth for evaluation', default=0.1)
-parser.add_argument('--max_depth_eval',            type=float, help='maximum depth for evaluation', default=100)
+parser.add_argument('--max_depth_eval',            type=float, help='maximum depth for evaluation', default=10)
 parser.add_argument('--eval_freq',                 type=int,   help='Online evaluation frequency in global steps', default=2000)
 parser.add_argument('--num_threads_eval',          type=int,   default=2)
 
@@ -197,12 +197,17 @@ def online_eval(model, dataloader_eval, gpu, ngpus):
         'mvs': torch.zeros(11).cuda(device=gpu)
     }
     for _, eval_sample_batched in enumerate(tqdm(dataloader_eval.data)):
+
         with torch.no_grad():
             image = torch.autograd.Variable(eval_sample_batched['image'].cuda(gpu, non_blocking=True))
             gt_depth = eval_sample_batched['depth']
             _, _, _, _, pred_depth = model(image)
+
+            pred_depth = align_mvs(pred_depth, torch.autograd.Variable(gt_depth.cuda(gpu, non_blocking=True)), eval_sample_batched['entry'])
+
             pred_depth = pred_depth.cpu().numpy().squeeze()
             gt_depth = gt_depth.cpu().numpy().squeeze()
+
         entry = eval_sample_batched['entry'][0][0]
         datasetname = entry.split(' ')[0].split('_')[0]
 
@@ -255,7 +260,8 @@ def align_mvs(depth_est, depth_gt, entry):
         mask = (depth_gt > 0) * (depth_gt < 100)
         scale_term = torch.mean(depth_gt * mask, dim=[2, 3], keepdim=True) / (torch.mean(depth_est * mask, dim=[2, 3], keepdim=True) +1e-10)
         for idx, e in enumerate(entry[0]):
-            scale_term[idx] = 1
+            if e.split(' ')[0].split('_')[0] != 'mvs':
+                scale_term[idx] = 1
     return depth_est * scale_term
 
 def main_worker(gpu, ngpus_per_node, args):
@@ -328,8 +334,11 @@ def main_worker(gpu, ngpus_per_node, args):
             lpg8x8, lpg4x4, lpg2x2, reduc1x1, depth_est = model(image)
 
             depth_est = align_mvs(depth_est, depth_gt, entry)
-
             mask = (depth_gt > 0) * (depth_gt < args.max_depth)
+
+            for kk in range(len(entry[0])):
+                if entry[0][kk].split(' ')[0].split('_')[0] == 'mvs':
+                    mask[kk] = (depth_gt[kk] > 0) * (depth_gt[kk] < 100)
 
             loss = silog_criterion.forward(depth_est, depth_gt, mask.to(torch.bool))
             loss.backward()
@@ -355,15 +364,15 @@ def main_worker(gpu, ngpus_per_node, args):
                 if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
                     viewind = 0
                     # vlsmax = (torch.sum(depth_gt[viewind] * mask[viewind]) / (torch.sum(mask[viewind]) + 1)).item()
-                    vlsmax = np.percentile(1 / (depth_gt[viewind][mask[viewind]].cpu().numpy() + 0.001), 0.9)
+                    # vlsmax = np.percentile(depth_gt[viewind][mask[viewind]].cpu().numpy(), 0.95)
                     depth_gt_ = torch.clone(depth_gt)
                     depth_gt_[depth_gt_ == 0] = 1e10
 
                     outrange_sel = mask[viewind].squeeze().cpu().numpy() == 0
 
-                    fig_gt = tensor2disp(1 / depth_gt_, vmax=vlsmax, viewind=viewind)
+                    fig_gt = tensor2disp(1 / depth_gt_, vmax=1, viewind=viewind)
                     fig_rgb = tensor2rgb(sample_batched['image'], viewind=viewind)
-                    fig_depth = tensor2disp(1 / depth_est, vmax=vlsmax, viewind=viewind)
+                    fig_depth = tensor2disp(1 / depth_est, vmax=1, viewind=viewind)
 
                     fig_rgb = np.array(fig_rgb)
                     fig_rgb[outrange_sel, 0] = fig_rgb[outrange_sel, 0] * 0.5 + 255.0 * 0.5
