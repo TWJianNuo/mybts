@@ -165,12 +165,13 @@ def online_generation(model, dataloader_eval, gpu, ss):
             else:
                 valid_mask = np.logical_and(gt_depth[k] > args.min_depth_eval, gt_depth[k] < 10)
 
-            assert np.sum(valid_mask) > 10, print("Invalid Groundtruth")
-
-            scale = np.sum(gt_depth[k][valid_mask]) / np.sum(pred_depth[k][valid_mask])
-
-            pred_depth_sv = pred_depth[k] * scale
-            pred_depth_sv = np.clip(pred_depth_sv, a_min=0.1, a_max=100)
+            if np.sum(valid_mask) < 100:
+                scale = 1
+                pred_depth_sv = np.zeros([480, 640])
+            else:
+                scale = np.sum(gt_depth[k][valid_mask]) / np.sum(pred_depth[k][valid_mask])
+                pred_depth_sv = pred_depth[k] * scale
+                pred_depth_sv = np.clip(pred_depth_sv, a_min=0.1, a_max=100)
 
             svfold = os.path.join(args.export_root, ss, eval_sample_batched['entry'][0][k].split(' ')[0])
             os.makedirs(svfold, exist_ok=True)
