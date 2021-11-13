@@ -232,7 +232,7 @@ def main_worker(gpu, ngpus_per_node, args):
     train_measures_cpu_rec = list()
     jitterparams = np.linspace(0, 1.2, 12)
 
-    if args.split in ['sun3d', 'rgbd']:
+    if args.split in ['sun3d', 'rgbd', 'mvs']:
         for jitterparam in jitterparams:
             dataloader_train = BtsDataLoader(args, args.split, batch_size=8, num_workers=2, jitterparam=jitterparam, is_test=False, verbose=False, islimit=True)
             train_measures_cpu = online_eval(model, dataloader_train, gpu, ngpus_per_node, entrynum=dataloader_train.demon.__len__())
