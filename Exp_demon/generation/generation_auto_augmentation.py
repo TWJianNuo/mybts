@@ -237,11 +237,11 @@ def main_worker(gpu, ngpus_per_node, args):
             train_measures_cpu = online_eval(model, dataloader_train, gpu, ngpus_per_node, entrynum=dataloader_train.demon.__len__())
             if gpu == 0:
                 print("Split: %s, Aug: %f, Counts: %d, abs_rel: %f, abs_diff: %f, a1: %f, l1_inv: %f, sc_inv: %f" % (args.split, jitterparam, train_measures_cpu[10], train_measures_cpu[0], train_measures_cpu[1], train_measures_cpu[5], train_measures_cpu[8], train_measures_cpu[9]))
-            train_scinv_aug.append(train_measures_cpu[9])
+            train_scinv_aug.append(train_measures_cpu[9].item())
             train_measures_cpu_rec.append(train_measures_cpu)
 
         train_scinv_aug = np.array(train_scinv_aug)
-        opt_jitterparam = np.argmin(np.abs(train_scinv_aug - eval_measures_cpu[9]))
+        opt_jitterparam = np.argmin(np.abs(train_scinv_aug - eval_measures_cpu[9].item()))
 
         if gpu == 0:
             train_measures_cpu = train_measures_cpu_rec[opt_jitterparam]
