@@ -25,67 +25,52 @@ from glob import glob
 
 from distributed_sampler_no_evenly_divisible import *
 
-import torch.utils.data.distributed
 from torchvision import transforms
+import torch.utils.data.distributed
+from torchvision.transforms import ColorJitter
 from torch.utils.data import Dataset, DataLoader
 
 class BtsDataLoader(object):
-    def __init__(self, args, is_test=True):
-        self.demon = DeMoN(args.demon_path, args, is_test)
+    def __init__(self, args, subset, jitterparam, batch_size, num_workers, is_test=True, verbose=False):
+        self.demon = DeMoN(args.demon_path, args, subset, jitterparam, is_test, verbose)
         self.eval_sampler = DistributedSamplerNoEvenlyDivisible(self.demon, shuffle=False) if args.distributed else None
-        self.data = DataLoader(self.demon, 1, shuffle=False, num_workers=1, pin_memory=True, sampler=self.eval_sampler, drop_last=False)
-
+        self.data = DataLoader(self.demon, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, sampler=self.eval_sampler, drop_last=False)
 
 class DeMoN(Dataset):
-    def __init__(self, root, args, is_test=True):
+    def __init__(self, root, args, subset, jitterparam, istest, verbose=False):
         self.args = args
         self.root = root
-        self.is_test = is_test
         self.color_normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        self.subset = subset
 
-        self.input_height = self.args.input_height
-        self.input_width = self.args.input_width
-
-        self.MAXFLOW = 1e10
-
+        self.is_test = istest
         if self.is_test:
             self.split = 'test'
         else:
             self.split = 'train'
 
-        catcounts = {'sun3d': 0,
-                     'rgbd': 0,
-                     'scenes11': 0,
-                     'mvs': 0
-                     }
-
         self.entries = list()
         for seq in glob(os.path.join(self.args.demon_path, self.split, '*/')):
-            jpgpaths = glob(os.path.join(seq, '*.jpg'))
-            for idx in range(len(jpgpaths)):
-                self.entries.append("{} {}".format(seq.split('/')[-2], str(idx)))
-
-        for entry in self.entries:
-            catcounts[entry.split(' ')[0].split('_')[0]] += 1
-
-        if not is_test:
-            self.crop_flip = T.AugmentationList([
-                T.RandomCrop(crop_type='absolute', crop_size=[self.args.input_height, self.args.input_width]),
-                T.RandomFlip(prob=0.5, horizontal=True)])
-
-        print("Dataset Samples: sun3d: %d, rgbd: %d, scenes11: %d, mvs: %d" % (catcounts['sun3d'], catcounts['rgbd'], catcounts['scenes11'], catcounts['mvs']))
+            if seq.split('/')[-2].split('_')[0] == self.subset:
+                jpgpaths = glob(os.path.join(seq, '*.jpg'))
+                for idx in range(len(jpgpaths)):
+                    self.entries.append("{} {}".format(seq.split('/')[-2], str(idx)))
 
         random.seed(2022)
         random.shuffle(self.entries)
+
+        if not self.is_test:
+            self.entries = self.entries[0:500]
+
+        if verbose:
+            print("Dataset Split: %s, entries: %d" % (self.subset, len(self.entries)))
+
+        self.photo_aug = ColorJitter(brightness=jitterparam, contrast=jitterparam, saturation=jitterparam, hue=jitterparam / 3.14)
 
     def __getitem__(self, idx):
         entry = self.entries[idx]
         seqname, jpgidx = entry.split(' ')
         jpgidx = int(jpgidx)
-
-        intrinsic_path = os.path.join(self.root, self.split, seqname, 'cam.txt')
-        K = np.eye(4)
-        K[0:3, 0:3] = copy.deepcopy(np.genfromtxt(intrinsic_path).astype(np.float32).reshape((3, 3)))
 
         # Read RGB
         image = Image.open(os.path.join(self.root, self.split, seqname, "{}.jpg".format(str(jpgidx).zfill(4))))
@@ -94,28 +79,17 @@ class DeMoN(Dataset):
         depth_gt = np.load(os.path.join(self.root, self.split, seqname, "{}.npy".format(str(jpgidx).zfill(4))))
         depth_gt[np.isnan(depth_gt)] = 0
         depth_gt[np.isinf(depth_gt)] = 0
-        if 'scenes11' in seqname:
-            depth_gt = depth_gt / 5
 
-        # Read Size
-        size = np.array(image.size)
+        # Augmentation in Training
+        if not self.is_test:
+            image = self.photo_aug(image)
 
         # Convert to numpy
         image, depth_gt = self.cvt_np(image=image, depth_gt=depth_gt)
 
-        # Augmentation in Training
-        if not self.is_test:
-            # Random Rotation
-            if self.args.do_random_rotate:
-                image, depth_gt = self.do_random_rotate(image=image, depth_gt=depth_gt)
-
-            # Random Crop and Flip
-            image, depth_gt, K = self.do_random_crop_flip(image=image, depth_gt=depth_gt, K=K)
-            image = self.do_random_coloraug(image=image)
-
-        image, depth_gt, K = self.to_tensor(image=image, depth_gt=depth_gt, K=K)
+        image, depth_gt = self.to_tensor(image=image, depth_gt=depth_gt)
         image = self.color_normalize(image)
-        sample = {'image': image, 'depth': depth_gt, 'K': K, 'size': size, 'entry':[entry]}
+        sample = {'image': image, 'depth': depth_gt, 'entry':[entry]}
         return sample
 
     def do_random_rotate(self, image, depth_gt):
@@ -163,8 +137,6 @@ class DeMoN(Dataset):
             color_image = np.stack([white * colors[i] for i in range(3)], axis=2)
             image_aug *= color_image
             image_aug = np.clip(image_aug, 0, 1) * 255.0
-        else:
-            image_aug = image * 255.0
         return image_aug
 
     def cvt_np(self, image, depth_gt):
@@ -172,11 +144,10 @@ class DeMoN(Dataset):
         depth_gt = np.array(depth_gt)
         return image, depth_gt
 
-    def to_tensor(self, image, depth_gt, K):
+    def to_tensor(self, image, depth_gt, ):
         image = torch.from_numpy(np.copy(image)).permute([2, 0, 1]).contiguous().float() / 255.0
         depth_gt = torch.from_numpy(np.copy(depth_gt)).unsqueeze(0).contiguous().float()
-        K = torch.from_numpy(K).float()
-        return image, depth_gt, K
+        return image, depth_gt
 
     def __len__(self):
         return len(self.entries)
